@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Offline lockdown: scripts only from local files (plus the inline config below), images only
+     from data: URLs (used to rasterise the SVG), and no fetch/XHR/websocket/font/frame loads. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src file: 'unsafe-inline'; img-src data:; style-src 'unsafe-inline'; connect-src 'none'; font-src 'none'; frame-src 'none'; form-action 'none'">
+<script>
+  // MathJax configuration: self-contained SVG paths (no shared glyph cache), no page typesetting,
+  // LaTeX errors thrown to the caller instead of being drawn in red. The context menu is disabled:
+  // it is the only way MathJax would try to load its speech/accessibility add-on from a CDN.
+  window.MathJax = {
+    options: { enableMenu: false },
+    startup: { typeset: false },
+    svg: { fontCache: 'none' },
+    tex: {
+      packages: { '[+]': ['ams', 'boldsymbol', 'mathtools', 'physics', 'braket', 'cancel', 'color'],
+                  '[-]': ['noundefined', 'noerrors'] },
+      formatError: (jax, err) => { throw err; }
+    }
+  };
+
+  /**
+   * Typeset `tex` and rasterize it to a PNG data URL.
+   *   tex      – LaTeX math source (no surrounding $)
+   *   fontPx   – body font size the equation should match, in CSS px (= points on macOS)
+   *   scale    – pixel density of the PNG (2 = Retina)
+   *   display  – true for display style (\displaystyle), false for inline style
+   *   ink      – CSS colour of the glyphs ('#000' for light mode, '#fff' for dark mode);
+   *              the background is transparent
+   * Returns {png, width, height} with width/height in points.
+   */
+  async function renderTeX(tex, fontPx, scale, display, ink) {
+    await MathJax.startup.promise;
+    let node;
+    try {
+      node = MathJax.tex2svg(tex, { display: display });
+    } catch (e) {
+      // MathJax's TexError isn't an Error subclass; rethrow so the message survives the bridge.
+      throw new Error(e && e.message ? e.message : String(e));
+    }
+    const svg = node.querySelector('svg');
+    document.body.style.fontSize = fontPx + 'px';
+    document.body.appendChild(node);
+    const rect = svg.getBoundingClientRect();
+    const w = rect.width, h = rect.height, pad = Math.round(fontPx * 0.15);
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('color', ink);
+    svg.style.color = ink;
+    const xml = new XMLSerializer().serializeToString(svg);
+    node.remove();
+
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('could not rasterize SVG'));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+    });
+    const W = w + 2 * pad, H = h + 2 * pad;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(W * scale);
+    canvas.height = Math.ceil(H * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, pad * scale, pad * scale, w * scale, h * scale);
+    return { png: canvas.toDataURL('image/png'), width: W, height: H };
+  }
+</script>
+<script src="tex-svg-full.js"></script>
+</head>
+<body style="margin:0; font-family: -apple-system;"></body>
+</html>

@@ -160,7 +160,9 @@ Re-run it after any source change.
 ### 3. Grant Accessibility
 
 On first launch, macOS asks for Accessibility access. Turn on **Pri Notes** in **System Settings →
-Privacy & Security → Accessibility**. The app starts working within a couple of seconds, with no
+Privacy & Security → Accessibility**. On macOS 27 this list is called **Device Control and Data
+Access**. Its description lists everything such apps *could* do; Pri Notes only watches the keyboard
+while Notes is in front, and reads and edits Notes (see Privacy and resource use). The app starts working within a couple of seconds, with no
 relaunch needed.
 
 The menu-bar icon (text lines with a "P" badge) has toggles for each feature, live preview, script

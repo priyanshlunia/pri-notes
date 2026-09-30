@@ -33,6 +33,9 @@ final class Formatter {
     private var ax: NotesAX?
     /// True while we are editing, so our own edits never re-trigger detection.
     private var isBusy = false
+    /// The unclosed `$…`/`$$…` being edited: where its delimiter starts, and the text that followed
+    /// it on the line when editing began. See `editingSpan(in:at:)`.
+    private var editTail: (start: Int, tail: String)?
 
     private static let attachmentCharacter: unichar = 0xFFFC
     /// Invisible separator placed after text equations so later typing uses the body font.
@@ -127,6 +130,30 @@ final class Formatter {
         }
     }
 
+    /// The math span the cursor is in, for the live preview and ⌃⌘E.
+    ///
+    /// An unclosed span would otherwise run to the end of the line, so editing an equation in the
+    /// middle of a sentence would treat the rest of the sentence as LaTeX. Instead, the text that
+    /// followed the cursor when the edit began (or, after ⌃⌘E reopens an equation, the text that
+    /// followed the equation) is remembered and kept outside the span (`MathSpans.trimmed`).
+    ///
+    /// Example: reopening the equation in "so x² is small." gives "so $x^2 is small." with the
+    /// tail " is small." remembered, so the span's source is "x^2" wherever the cursor is inside it.
+    func editingSpan(in text: NSString, at cursor: Int) -> MathSpan? {
+        guard let span = MathSpans.span(in: text, at: cursor) else { editTail = nil; return nil }
+        if span.closed { editTail = nil; return span }
+        if let remembered = editTail, remembered.start == span.fullRange.location,
+           let cut = MathSpans.trimmed(span, in: text, keepingOutside: remembered.tail) {
+            // The cursor may have moved into the remembered tail, which isn't part of the equation.
+            return cursor <= NSMaxRange(cut.sourceRange) ? cut : nil
+        }
+        // A new edit: everything after the cursor on this line stays outside the equation.
+        let lineEnd = NSMaxRange(span.fullRange)
+        let tail = text.substring(with: NSRange(location: cursor, length: lineEnd - cursor))
+        editTail = (span.fullRange.location, tail)
+        return MathSpans.trimmed(span, in: text, keepingOutside: tail)
+    }
+
     /// ⌃⌘E. Inside a `$…`/`$$…` span: convert it now. On a converted equation (cursor right after
     /// it, or equation selected): turn it back into `$source` / `$$source` for editing.
     func toggleEquation() {
@@ -134,11 +161,9 @@ final class Formatter {
         let (ax, el, text, sel) = (ctx.ax, ctx.element, ctx.text, ctx.selection)
 
         // 1. Commit an equation being typed or edited.
-        if sel.length == 0, let span = MathSpans.span(in: text, at: sel.location) {
-            let range = span.closed ? span.fullRange
-                : NSRange(location: span.fullRange.location, length: sel.location - span.fullRange.location)
-            let source = text.substring(with: span.sourceRange.intersection(range) ?? span.sourceRange)
-                .trimmingCharacters(in: .whitespaces)
+        if sel.length == 0, let span = editingSpan(in: text, at: sel.location) {
+            let range = span.fullRange
+            let source = text.substring(with: span.sourceRange).trimmingCharacters(in: .whitespaces)
             guard !source.isEmpty else { return }
             isBusy = true
             defer { isBusy = false }
@@ -160,24 +185,41 @@ final class Formatter {
             guard let source = sourceOfImage(at: imageRange, ax: ax, el: el) else {
                 return fail("No LaTeX source found for this image (only equations made by Pri Notes can be edited).")
             }
-            reopen(source: "$$" + source, over: imageRange, ax: ax, el: el)
+            reopen(source: "$$" + source, over: imageRange, text: text, ax: ax, el: el)
             return
         }
 
-        // 3. A Unicode/rich-text equation: selected, or the most recent one just before the cursor.
+        // 3. A Unicode/rich-text equation: selected, or just before the cursor.
         // Text equations end in an invisible zero-width space (see insertTextMath); include it in
-        // the range being replaced but ignore it when matching.
+        // the range being replaced but ignore it when matching. The cursor can sit on either side
+        // of it, since it has no width.
         var entry: EquationStore.Entry?
         var range = sel
         if sel.length > 0 {
             entry = store.source(forText: text.substring(with: sel).replacingOccurrences(of: Formatter.zeroWidthSpace, with: ""))
         } else {
-            var end = sel.location
-            if end > 0, text.substring(with: NSRange(location: end - 1, length: 1)) == Formatter.zeroWidthSpace { end -= 1 }
-            if let latest = store.latestUnicodeEntry(endingAt: text.substring(to: end)), let t = latest.text {
-                entry = latest
+            let zwsp = Formatter.zeroWidthSpace
+            var end = sel.location          // end of the equation's own text
+            var replaceEnd = sel.location   // end of what gets replaced (includes the marker)
+            var hasMarker = false
+            if end > 0, text.substring(with: NSRange(location: end - 1, length: 1)) == zwsp {
+                end -= 1
+                hasMarker = true
+            } else if sel.location < text.length, text.substring(with: NSRange(location: sel.location, length: 1)) == zwsp {
+                replaceEnd += 1
+                hasMarker = true
+            }
+            let prefix = text.substring(to: end)
+            // With the marker, the text before it is known to be an equation, so any equation in the
+            // history may match. Without it, only the latest, so a short result like "x" can't be
+            // confused with ordinary text.
+            let found = hasMarker
+                ? store.unicodeEntry(endingAt: prefix)
+                : store.latestUnicodeEntry(endingAt: prefix)
+            if let found, let t = found.text {
+                entry = found
                 let start = end - (t as NSString).length
-                range = NSRange(location: start, length: sel.location - start)
+                range = NSRange(location: start, length: replaceEnd - start)
             }
         }
         guard let entry else {
@@ -185,7 +227,7 @@ final class Formatter {
         }
         isBusy = true
         defer { isBusy = false }
-        reopen(source: "$" + entry.source, over: range, ax: ax, el: el)
+        reopen(source: "$" + entry.source, over: range, text: text, ax: ax, el: el)
     }
 
     // MARK: - Markdown actions
@@ -232,6 +274,9 @@ final class Formatter {
     /// (Earlier versions pasted rich text with Edit ▸ Paste and Retain Style. Notes enables that item
     /// based on a stale view of the clipboard, so the press was often silently ignored.)
     private func insertTextMath(latex: String, over range: NSRange, ax: NotesAX, el: AXUIElement) {
+        // A marker from an earlier equation can end up inside a new span (e.g. "$" typed around
+        // converted text). It isn't LaTeX, so keep it out of the source and the history.
+        let latex = latex.replacingOccurrences(of: Formatter.zeroWidthSpace, with: "")
         let runs = LatexUnicode.convertRich(latex, unicodeScripts: !richScripts)
         let plain = runs.map(\.text).joined()
         // The typed "$" carries the style of the surrounding text.
@@ -281,6 +326,7 @@ final class Formatter {
     }
 
     private func startRenderedMath(latex: String, over range: NSRange, text: NSString, ax: NotesAX, el: AXUIElement) {
+        let latex = latex.replacingOccurrences(of: Formatter.zeroWidthSpace, with: "")   // see insertTextMath
         let source = text.substring(with: range)
         let size = ax.fontSize(of: el, at: max(0, range.location - 1))
         let dark = isDarkMode
@@ -325,7 +371,17 @@ final class Formatter {
 
     /// Replace a converted equation with its (unclosed) source so it can be edited; typing the
     /// closing delimiter or pressing ⌃⌘E converts it again.
-    private func reopen(source: String, over range: NSRange, ax: NotesAX, el: AXUIElement) {
+    private func reopen(source: String, over range: NSRange, text: NSString, ax: NotesAX, el: AXUIElement) {
+        // Remember what followed the equation on its line, so the reopened (unclosed) span ends
+        // there rather than at the end of the line (see editingSpan).
+        let line = text.lineRange(for: NSRange(location: range.location, length: 0))
+        var lineEnd = NSMaxRange(line)
+        while lineEnd > NSMaxRange(range), let c = UnicodeScalar(text.character(at: lineEnd - 1)),
+              CharacterSet.newlines.contains(c) { lineEnd -= 1 }
+        let tail = lineEnd > NSMaxRange(range)
+            ? text.substring(with: NSRange(location: NSMaxRange(range), length: lineEnd - NSMaxRange(range))) : ""
+        editTail = (range.location, tail)
+
         // Delete the equation first, then insert at the empty spot: text inserted into a collapsed
         // selection takes the attributes of the character before it (the note's own font), not the
         // equation's Palatino Italic.

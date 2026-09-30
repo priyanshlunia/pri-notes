@@ -48,6 +48,12 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 **Live preview and re-editing.**
 - The glass preview panel renders the `$…`/`$$…` span under the cursor.
 - ⌃⌘E inside a span converts it now. After an equation, it reopens it as `$source` / `$$source`.
+- An unclosed span would run to the end of the line. `Formatter.editingSpan` remembers the text that
+  followed the cursor when the edit began (after a reopen: the text after the equation) and keeps it
+  outside the span (`MathSpans.trimmed`), so mid-sentence edits preview and convert only the equation.
+- A text equation is recognised by its trailing U+200B. With the marker next to the cursor, any history
+  entry may match (longest wins); without it, only the latest, so short results like "x" aren't
+  confused with ordinary text. U+200B is stripped from every source before converting.
 - Image sources are recovered from the attachment inside `com.apple.flat-rtfd` after Edit ▸ Copy.
   Notes fills that lazily, so the app retries for up to 1.5 s.
 - Text equations are found through `EquationStore`: `equations.json`, capped at 5,000 entries.
@@ -108,12 +114,14 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 
 ## Verification
 
-- **Self-tests:** `swift run selftest` passes 178/178. It covers rules, math spans, LaTeX examples,
+- **Self-tests:** `swift run selftest` passes 184/184. It covers rules, math spans, LaTeX examples,
   rich and Unicode runs, style-sample RTF round trips (exact sRGB), and script sizes.
 - **In Notes:** `--notes-lab` in a note starting "PRI-LAB":
   - `--phase3`: every toolbar change;
   - `--phase4`: equations after styled text, Palatino kept, colour matched exactly;
-  - `--phase7`: B/I/U/S on and off with font and colour kept.
+  - `--phase7`: B/I/U/S on and off with font and colour kept;
+  - `--phase8`: ⌃⌘E reopening any text equation mid-sentence, the edited span stopping at the rest
+    of the sentence, and no U+200B in stored sources.
 - **Offline checks:** `--render`, `--preview-snapshot`, `--toolbar-snapshot`, `--menubar-icon`,
   `--network-test`, `--recover-from-clipboard`.
 - **Confirmed in use:** Markdown, text math, image re-editing, the glass toolbar and preview, and U/⌘U
@@ -127,7 +135,6 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 ## Known limitations
 
 - Equation images keep the ink colour of the appearance they were inserted in; ⌃⌘E twice re-renders.
-- Without a selection, ⌃⌘E reopens only the most recent text equation.
 - Toolbar changes and underline removal take several ⌘Z steps to undo, one per style run.
 - Underlined links keep their underline. Text right after an underlined character re-inherits the
   underline when it is retyped.

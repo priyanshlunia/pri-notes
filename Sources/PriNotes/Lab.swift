@@ -14,6 +14,8 @@ import PriNotesCore
 /// - `--phase4`: `$…$` equations typed after styled text; equations keep Palatino under toolbar
 ///   changes and match the surrounding colour.
 /// - `--phase7`: B/I/U/S toggles on and off, keeping font and colour.
+/// - `--phase8`: ⌃⌘E on text equations mid-sentence (any equation, span stops at the sentence),
+///   and no zero-width marker in stored sources.
 /// Findings are recorded in docs/NOTES.md.
 @MainActor
 enum NotesLab {
@@ -130,6 +132,69 @@ enum NotesLab {
             toggle(.strikethrough, "epsilon"); out("  on  → \(state("epsilon"))")
             toggle(.strikethrough, "epsilon"); out("  off → \(state("epsilon"))")
             out("text intact: \((ax.value(of: el) ?? "").hasSuffix(testLine))")
+            finish(0)
+        }
+
+        if CommandLine.arguments.contains("--phase8") {
+            // ⌃⌘E on text equations mid-sentence: reopening any (not just the latest), the edited
+            // span stopping at the rest of the sentence, and no zero-width marker in stored sources.
+            let formatter = Formatter()
+            func text() -> NSString { ax.value(of: el) ?? "" }
+            func cursor() -> Int { ax.selectedRange(of: el)?.location ?? -1 }
+            func append(_ s: String) {
+                let end = text().length
+                ax.replace(in: el, range: NSRange(location: end, length: 0), with: s)
+                ax.setSelectedRange(of: el, NSRange(location: end + (s as NSString).length, length: 0))
+                pause(0.15)
+            }
+            func line() -> String { text().substring(from: base).debugDescription }
+            func editing() -> String {
+                guard let span = formatter.editingSpan(in: text(), at: cursor()) else { return "no span" }
+                return "source \(text().substring(with: span.sourceRange).debugDescription) closed \(span.closed)"
+            }
+            let zwsp = Formatter.zeroWidthSpace
+
+            // Build "so βN​ is high, and ne​ is low." by typing each equation and converting it.
+            ax.replace(in: el, range: NSRange(location: base, length: text().length - base), with: "")
+            append("so $\\beta_N$"); formatter.check(); pause(0.8)
+            append(" is high, and $n_e$"); formatter.check(); pause(0.8)
+            append(" is low.")
+            out("== setup\n  line: \(line())")
+
+            // A. Cursor right after the older equation βN (after its marker), ⌃⌘E.
+            let afterBeta = text().range(of: "N" + zwsp).location + 2
+            ax.setSelectedRange(of: el, NSRange(location: afterBeta, length: 0)); pause(0.1)
+            formatter.toggleEquation(); pause(0.5)
+            out("== A. reopen the older equation (cursor after its marker)\n  line: \(line())\n  cursor \(cursor())  \(editing())")
+
+            // B. Cursor moved into the middle of the reopened source: still only "\beta_N".
+            ax.setSelectedRange(of: el, NSRange(location: cursor() - 3, length: 0)); pause(0.1)
+            out("== B. cursor inside the reopened source\n  \(editing())")
+
+            // C. ⌃⌘E again converts it back, leaving the rest of the sentence alone.
+            formatter.toggleEquation(); pause(0.8)
+            out("== C. convert it back\n  line: \(line())")
+
+            // D. Cursor *before* ne's marker (ne is no longer the latest), ⌃⌘E, then convert back.
+            let beforeMarker = text().range(of: "e" + zwsp + " is low").location + 1
+            ax.setSelectedRange(of: el, NSRange(location: beforeMarker, length: 0)); pause(0.1)
+            formatter.toggleEquation(); pause(0.5)
+            out("== D. reopen with the cursor before the marker\n  line: \(line())\n  \(editing())")
+            formatter.toggleEquation(); pause(0.8)
+            out("  converted back: \(line())")
+
+            // E. A new equation typed mid-sentence: the preview span stops at the cursor's old tail.
+            let isAt = text().range(of: " is high").location
+            ax.replace(in: el, range: NSRange(location: isAt, length: 0), with: " $x^2")
+            ax.setSelectedRange(of: el, NSRange(location: isAt + 5, length: 0)); pause(0.15)
+            out("== E. new equation typed mid-sentence\n  \(editing())")
+            ax.replace(in: el, range: NSRange(location: isAt, length: 5), with: ""); pause(0.15)
+
+            // F. "$" typed around text that contains an old marker: the stored source has no marker.
+            append(" $T" + zwsp + "_e$"); formatter.check(); pause(0.8)
+            let stored = formatter.store.entries.last?.source ?? "(none)"
+            out("== F. span containing an old marker\n  stored source \(stored.debugDescription) has marker: \(stored.contains(zwsp))")
+            out("  line: \(line())")
             finish(0)
         }
 

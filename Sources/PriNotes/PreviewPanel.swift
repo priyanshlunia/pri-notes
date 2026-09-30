@@ -107,9 +107,11 @@ final class LivePreview {
 
     func update() {
         guard isEnabled, let ctx = formatter.currentContext(),
-              let span = MathSpans.span(in: ctx.text, at: ctx.selection.location) else { return hide() }
+              let span = formatter.editingSpan(in: ctx.text, at: ctx.selection.location) else { return hide() }
         let family: RuleSet = span.display ? .renderedMath : .unicodeMath
-        let source = ctx.text.substring(with: span.sourceRange).trimmingCharacters(in: .whitespaces)
+        let source = ctx.text.substring(with: span.sourceRange)
+            .replacingOccurrences(of: Formatter.zeroWidthSpace, with: "")
+            .trimmingCharacters(in: .whitespaces)
         guard formatter.enabled.contains(family), !source.isEmpty,
               span.display || !MathSpans.looksLikeMoney(source) else { return hide() }
 

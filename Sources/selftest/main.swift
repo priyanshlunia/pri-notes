@@ -77,6 +77,20 @@ do {
     check(s != nil && MathSpans.looksLikeMoney(money.substring(with: s!.sourceRange)), "money heuristic")
     check(MathSpans.span(in: "a \\$x" as NSString, at: 5) == nil, "escaped dollar")
     check(MathSpans.span(in: "line1 $x\nnext" as NSString, at: 13) == nil, "spans are per line")
+
+    // Editing mid-sentence: the text after the equation stays outside it.
+    let mid = "so $x^2 is small.\nnext" as NSString
+    let open = MathSpans.span(in: mid, at: 7)!
+    check(MathSpans.trimmed(open, in: mid, keepingOutside: " is small.") ==
+          MathSpan(display: false, sourceRange: r(4, 3), fullRange: r(3, 4), closed: false), "trimmed: tail kept outside")
+    check(MathSpans.trimmed(open, in: mid, keepingOutside: "") == open, "trimmed: empty tail keeps the whole line")
+    check(MathSpans.trimmed(open, in: mid, keepingOutside: " is big.") == nil, "trimmed: edited tail no longer matches")
+    check(MathSpans.trimmed(open, in: mid, keepingOutside: "so $x^2 is small.") == nil, "trimmed: tail longer than span")
+    let reopened = "a $$\\frac{1}{2}, then b" as NSString
+    let disp = MathSpans.span(in: reopened, at: 8)!
+    check(MathSpans.trimmed(disp, in: reopened, keepingOutside: ", then b")?.sourceRange == r(4, 11), "trimmed: display span")
+    check(MathSpans.trimmed(MathSpans.span(in: d, at: 6)!, in: d, keepingOutside: "xyz") ==
+          MathSpans.span(in: d, at: 6), "trimmed: closed span unchanged")
 }
 
 // MARK: - LaTeX → Unicode examples

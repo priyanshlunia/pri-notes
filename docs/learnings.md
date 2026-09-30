@@ -560,10 +560,24 @@ flowchart TD
     MD -->|no| PH{"pixel hash in<br/>equations.json?"}
     PH -->|yes| RE
     PH -->|no| ERR[beep + menu error]
-    I -->|no| T{"selected text, or latest text equation<br/>right before the cursor, in equations.json?"}
+    I -->|no| T{"selected text, or a text equation ending at<br/>the cursor, in equations.json?<br/>(next to its U+200B: any, longest match,<br/>otherwise only the latest)"}
     T -->|yes| RE["replace the equation with '$source' / '$$source'<br/>(unclosed, so the preview reappears)"]
     T -->|no| ERR
     RE --> TYPE[you edit, then type the closing $<br/>and it converts again]
+```
+
+The reopened `$source` has no closing delimiter, so on its own it would run to the end of the line and
+swallow the rest of the sentence. The app remembers the text that followed the equation and keeps it
+outside:
+
+```text
+Formatter.editingSpan(text, cursor):              # Sources/PriNotes/Formatter.swift
+    span = MathSpans.span(text, cursor)             # unclosed: runs to the end of the line
+    if span was reopened or started earlier and the line still ends with its remembered tail:
+        return span minus the tail                 # MathSpans.trimmed
+    else:                                           # a new edit
+        tail = text from the cursor to the end of the line
+        remember (span start, tail); return span minus the tail
 ```
 
 ---
@@ -640,3 +654,5 @@ renderer and expects every one to be blocked.
     mode draws them lighter. Copy Style gives the stored value.
 11. **Test in the real app.** The `--notes-lab` harness (a note starting "PRI-LAB") found every one of
     the Notes behaviours above, which reasoning alone got wrong more than once.
+12. **An unclosed delimiter has no end.** Anything that edits "from `$` to the end of the line" breaks
+    as soon as the edit is mid-sentence. Remember what came after the edit point instead.

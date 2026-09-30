@@ -94,6 +94,38 @@ public enum MathSpans {
         }
     }
 
+    /// An unclosed span cut short so that `tail` stays outside it.
+    ///
+    /// An unclosed `$…` runs to the end of its line, which is wrong when an equation is being edited
+    /// in the middle of a sentence: the rest of the sentence would be read as LaTeX. The caller
+    /// remembers `tail`, the text that followed the cursor on the line when the edit began (for a
+    /// reopened equation, the text that followed the equation). Typing inside the equation doesn't
+    /// change that tail, so the equation is everything between the delimiter and the tail.
+    ///
+    /// Returns `nil` if the line no longer ends with `tail` (the tail itself was edited, or the
+    /// cursor is on another line), or if cutting it off would leave less than nothing. Closed spans
+    /// are returned unchanged.
+    ///
+    /// Example:
+    /// ```swift
+    /// let text = "so $x^2 is small." as NSString
+    /// let span = MathSpans.span(in: text, at: 7)!          // unclosed: source "x^2 is small."
+    /// MathSpans.trimmed(span, in: text, keepingOutside: " is small.")
+    /// // → sourceRange {4, 3} ("x^2"), fullRange {3, 4}
+    /// ```
+    public static func trimmed(_ span: MathSpan, in text: NSString, keepingOutside tail: String) -> MathSpan? {
+        if span.closed { return span }
+        let lineEnd = NSMaxRange(span.fullRange)
+        let tailLength = (tail as NSString).length
+        let newEnd = lineEnd - tailLength
+        guard newEnd >= span.sourceRange.location,
+              text.substring(with: NSRange(location: newEnd, length: tailLength)) == tail else { return nil }
+        var cut = span
+        cut.sourceRange.length = newEnd - span.sourceRange.location
+        cut.fullRange.length = newEnd - span.fullRange.location
+        return cut
+    }
+
     /// True if an unfinished inline `$` span looks like a price ("$5 and …") rather than math,
     /// so the live preview stays quiet while typing about money.
     public static func looksLikeMoney(_ source: String) -> Bool {

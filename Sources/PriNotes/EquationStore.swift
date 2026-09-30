@@ -63,6 +63,19 @@ final class EquationStore {
         return latest
     }
 
+    /// Any Unicode equation whose converted text sits just before the cursor (`prefix` = note text
+    /// up to the equation's trailing marker). Used only when that invisible marker is present, so the
+    /// text is known to be an equation. The longest match wins, so "xb2 + z" beats "z"; among equal
+    /// lengths, the most recent.
+    func unicodeEntry(endingAt prefix: String) -> Entry? {
+        var best: Entry?
+        for entry in entries.reversed() {
+            guard let text = entry.text, !text.isEmpty, prefix.hasSuffix(text) else { continue }
+            if best == nil || (text as NSString).length > (best!.text! as NSString).length { best = entry }
+        }
+        return best
+    }
+
     func source(forPixelHash hash: String) -> Entry? {
         entries.last { $0.pixelHash == hash }
     }

@@ -38,8 +38,9 @@ in its menu. `$$…$$` supports AMS math plus `physics`, `braket`, `mathtools`, 
   back into `$source` / `$$source` with the preview showing; edit, then type the closing delimiter
   (or press ⌃⌘E again) to convert it. Sources are kept in
   `~/Library/Application Support/PriNotes/equations.json`; image equations also carry their
-  LaTeX in the PNG metadata. For a text equation without a selection, only the most recent one can be
-  reopened this way; select older ones first.
+  LaTeX in the PNG metadata. Any text equation can be reopened, with the cursor on either side of
+  the invisible character that follows it. In the middle of a sentence only the equation is edited:
+  the rest of the sentence stays outside it, in the preview and when it converts.
 - **Dark mode:** equation images have a transparent background and are drawn in white or black to
   match the appearance *at the time they are inserted*. After switching appearance, ⌃⌘E twice
   re-renders one in the new colour.
@@ -214,6 +215,7 @@ open -n ~/Applications/Pri\ Notes.app --args --notes-lab /tmp/lab.txt --phase3
 - `--phase3`: toolbar changes.
 - `--phase4`: equations after styled text, and colour matching.
 - `--phase7`: B/I/U/S on and off.
+- `--phase8`: ⌃⌘E on text equations mid-sentence.
 
 Read the report in `/tmp/lab.txt` afterwards.
 

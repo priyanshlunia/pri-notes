@@ -375,7 +375,7 @@ final class SelectionStyler {
     }
 
     /// Bring Notes to the front if needed (e.g. after using the colour panel) and wait for it.
-    private func ensureNotesFrontmost() -> Bool {
+    func ensureNotesFrontmost() -> Bool {
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == NotesAX.bundleID { return true }
         guard let notes = NSRunningApplication.runningApplications(withBundleIdentifier: NotesAX.bundleID).first
         else { return false }

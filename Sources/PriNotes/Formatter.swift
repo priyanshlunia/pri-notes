@@ -121,12 +121,7 @@ final class Formatter {
             }
             ax.setSelectedRange(of: el, NSRange(location: NSMaxRange(codeRange) + 1, length: 0))
         case let .link(matchRange, text, url):
-            // Plain Paste (match style): the link attribute survives, the note's font is kept.
-            let size = ax.fontSize(of: el, at: matchRange.location)
-            let snippet = NSMutableAttributedString(string: text, attributes: [
-                .font: NSFont.systemFont(ofSize: size), .link: URL(string: url) ?? url])
-            snippet.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: size)]))
-            paste(rtf: snippet, over: matchRange, ax: ax, el: el)
+            pasteLink(text: text, url: URL(string: url) ?? url, over: matchRange, trailingSpace: true, ax: ax, el: el)
         case let .unicodeMath(matchRange, latex):
             insertTextMath(latex: latex, over: matchRange, ax: ax, el: el)
         case let .renderedMath(matchRange, latex):
@@ -478,6 +473,23 @@ final class Formatter {
     }
 
     // MARK: - Pasteboard helpers
+
+    /// Replace `range` with `text` linked to `url` (a `URL`, or a `String` Notes may still accept).
+    ///
+    /// Plain Paste (match style): the link attribute survives, the note's font is kept. With
+    /// `trailingSpace`, a plain space follows the link so text typed next isn't part of it.
+    /// Returns false (and records the error) if the paste didn't land.
+    ///
+    /// Example: `pasteLink(text: "paper.pdf", url: link, over: NSRange(location: 12, length: 0),
+    /// trailingSpace: true, ax: ax, el: el)` inserts "paper.pdf " at offset 12.
+    @discardableResult
+    func pasteLink(text: String, url: Any, over range: NSRange, trailingSpace: Bool, ax: NotesAX, el: AXUIElement) -> Bool {
+        let size = ax.fontSize(of: el, at: range.location)
+        let snippet = NSMutableAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: size), .link: url])
+        if trailingSpace { snippet.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: size)])) }
+        return paste(rtf: snippet, over: range, ax: ax, el: el) != nil
+    }
+
 
     /// Paste `snippet` as RTF over `range`, wait (≤ 0.5 s) until the text appears in the note,
     /// and restore the clipboard afterwards.

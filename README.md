@@ -1,7 +1,8 @@
 # Pri Notes (v1.1)
 
 A small menu-bar app that makes Apple Notes respond to Markdown as you type, adds LaTeX math, and
-puts a Liquid Glass formatting toolbar above selected text. Fully offline. Modelled on the Markdown part of [NotesCmdr](https://smallest.app/notescmdr/).
+puts a Liquid Glass formatting toolbar above selected text, and adds links to iCloud Drive files and
+folders that open on both your Mac and your iPhone. Fully offline. Modelled on the Markdown part of [NotesCmdr](https://smallest.app/notescmdr/).
 
 ## What it does
 
@@ -57,7 +58,7 @@ in its menu. `$$…$$` supports AMS math plus `physics`, `braket`, `mathtools`, 
 
 Select text in a note and, after a short pause, a Liquid Glass toolbar appears above it:
 
-`[ Font ▾ | Typeface ▾ ]  [ B  I  U  S ]  [ −  size ▾  + ]  [ colour ▾ ]`
+`[ Font ▾ | Typeface ▾ ]  [ B  I  U  S ]  [ −  size ▾  + ]  [ colour ▾ ]  [ 🔗 ]`
 
 - **Font:** a curated list (System, Palatino, Helvetica Neue, Avenir Next, Georgia, Times New Roman,
   Baskerville, Menlo, SF Mono), plus **All Fonts**. Each word keeps its own bold/italic and size.
@@ -74,11 +75,33 @@ Select text in a note and, after a short pause, a Liquid Glass toolbar appears a
 - **Equations stay Palatino:** font, typeface, bold and italic changes skip `$…$` equations. Colour
   and size apply to them, so they match the surrounding text. New equations also take the colour
   and size of the text you type them into.
+- **🔗 Link to file:** turns the selection into a link to a file or folder in iCloud Drive (see below).
 
 It hides when the selection is cleared, when you press Esc, or when Notes goes to the background.
 Turn it off with "Selection toolbar" in the menu-bar menu. Changes use Notes' own commands
 (Format ▸ Font ▸ Paste Style and friends), and only removing an underline retypes text. Links and
 attachments are never touched. A change may take several ⌘Z presses to undo, one per style run.
+
+## Links to iCloud Drive files
+
+Dragging a file into Notes copies it into the note, cut off from the original. Pri Notes can link to
+the real file or folder instead:
+
+- Press **⌃⌘K** in a note, or click 🔗 in the selection toolbar, and choose a file or folder in
+  iCloud Drive (app folders such as Obsidian's count too).
+- With text selected, the selection becomes the link. Otherwise the item's name is inserted.
+- **On iPhone,** tapping the link opens the item in the Files app. Nothing needs installing
+  there.
+- **On the Mac,** clicking it opens the folder in Finder or the file in its default app. Pri Notes
+  handles these links, and macOS starts it if it isn't running.
+
+The links are `shareddocuments://` URLs, the Files app's own scheme, holding the item's iCloud
+path. So a link breaks if the item is renamed or moved; the Mac then says it can't find it. Items
+outside iCloud Drive can't be linked, because the iPhone has no way to reach them.
+
+For safety, a link to an app, script or other executable is only revealed in Finder, never run, and
+links that point outside your iCloud folders are refused. Notes can be shared, so a link you click
+may not be one you made.
 
 ## Privacy and resource use
 
@@ -99,6 +122,9 @@ Pri Notes is fully offline and keeps everything on this Mac.
   Accessibility (in memory only) to find Markdown/math patterns. The clipboard is used only to insert
   links and equation images, and it is restored 0.5 s later. Fonts and colours go through the separate
   font pasteboard, which is also restored.
+- **File links:** opening one is a local file operation. Pri Notes only accepts paths inside
+  `~/Library/Mobile Documents` (your iCloud folders) and makes no network requests; iCloud itself does
+  any downloading.
 - **Cost:** ~0% CPU when idle (measured; the event tap does no work outside Notes). Memory ≈ 80 MB for the
   app plus ≈ 95 MB for WebKit's helper processes (MathJax).
 - It can't use the App Sandbox (which would forbid networking at the OS level) because sandboxed apps may
@@ -233,9 +259,10 @@ Layout:
   - `MathSpans.swift`: finds `$…$` and `$$…$$` spans on a line, for the preview and the in-math guard.
   - `LatexUnicode.swift`: LaTeX to text, as `MathRun`s with script level and italic flag.
   - `StyleSample.swift`: the RTF style sample for Paste Style (keeps the system font) and font conversions.
+  - `FileLinks.swift`: iCloud Drive path ↔ `shareddocuments://` link, with the safety checks.
 - `Sources/PriNotes/`: the app.
   - `main.swift`: app delegate, menu, settings, debug modes.
-  - `KeyMonitor.swift`: global key and click tap, active only while Notes is frontmost; ⌃⌘E and ⌘U.
+  - `KeyMonitor.swift`: global key and click tap, active only while Notes is frontmost; ⌃⌘E, ⌃⌘K and ⌘U.
   - `SelectionToolbar.swift`, `SelectionStyler.swift`: the Liquid Glass toolbar, and reading and
     applying styles (Paste Style, toggles, underline removal).
   - `NotesAX.swift`: Accessibility access to Notes (text, selection, fonts, bounds, menu items).
@@ -243,6 +270,8 @@ Layout:
   - `MathRenderer.swift`: locked-down, offline MathJax WebView, TeX to PNG.
   - `PreviewPanel.swift`: the live equation preview panel.
   - `EquationStore.swift`: equation history used for re-editing.
+  - `FileLinkInserter.swift`, `FileLinkOpener.swift`: ⌃⌘K and the toolbar's link button; opening
+    clicked file links on the Mac.
   - `MenuBarIcon.swift`: the menu-bar icon.
   - `Lab.swift`: the `--notes-lab` in-Notes experiment and regression harness.
   - `Log.swift`: the error log.
@@ -252,7 +281,6 @@ Layout:
 - `Resources/AppIcon.icns`: the app icon.
 - `scripts/build_app.sh`: builds, signs, installs and launches `Pri Notes.app`.
 - `scripts/make_icon.swift`: generates `Resources/AppIcon.icns`.
-- `docs/NOTES.md`: design notes, verification status and known limitations.
 - `docs/learnings.md`: how the app works, with flowcharts and pseudocode: macOS app anatomy, event taps,
   the Accessibility API, and how it reads and edits Notes.
 

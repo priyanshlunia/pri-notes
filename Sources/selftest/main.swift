@@ -152,5 +152,30 @@ do {
     check(abs(StyleSample.scriptSize(base: 10, level: 2) - 5) < 1e-9, "script size: second level 50 %")
 }
 
+// MARK: - File links (shareddocuments://)
+do {
+    let home = "/Users/me"
+    let drive = "/Users/me/Library/Mobile Documents/com~apple~CloudDocs"
+    func url(_ s: String) -> URL { URL(string: s)! }
+    let ios = "shareddocuments:///private/var/mobile/Library/Mobile%20Documents/"
+    check(FileLinks.macPath(for: url(ios + "com~apple~CloudDocs/a%20b/caf%C3%A9.txt"), home: home) == drive + "/a b/café.txt",
+          "file link → Mac path, decoded")
+    check(FileLinks.macPath(for: url("shareddocuments:///var/mobile/Library/Mobile%20Documents/com~apple~CloudDocs/X"), home: home) == drive + "/X",
+          "/var root without /private")
+    check(FileLinks.macPath(for: url(ios + "iCloud~md~obsidian/Documents/"), home: home) == "/Users/me/Library/Mobile Documents/iCloud~md~obsidian/Documents",
+          "app container, trailing slash")
+    check(FileLinks.macPath(for: url(ios + "com~apple~CloudDocs/../../../../etc/passwd"), home: home) == nil, ".. refused")
+    check(FileLinks.macPath(for: url(ios), home: home) == nil, "bare Mobile Documents refused")
+    check(FileLinks.macPath(for: url("shareddocuments:///etc/passwd"), home: home) == nil, "outside Mobile Documents refused")
+    check(FileLinks.macPath(for: url("shareddocuments://private/var/mobile/Library/Mobile%20Documents/x"), home: home) == nil, "host form refused")
+    check(FileLinks.macPath(for: url("file:///private/var/mobile/Library/Mobile%20Documents/x"), home: home) == nil, "other scheme refused")
+    let link = FileLinks.link(forMacPath: drive + "/Research/a b/café.txt", home: home)
+    check(link?.absoluteString == ios + "com~apple~CloudDocs/Research/a%20b/caf%C3%A9.txt", "Mac path → link, encoded")
+    check(link.flatMap { FileLinks.macPath(for: $0, home: home) } == drive + "/Research/a b/café.txt", "round trip")
+    check(FileLinks.link(forMacPath: "/Users/me/Desktop/x.txt", home: home) == nil, "non-iCloud path refused")
+    check(FileLinks.link(forMacPath: drive + "/#1 notes?.txt", home: home)
+          .flatMap { FileLinks.macPath(for: $0, home: home) } == drive + "/#1 notes?.txt", "# and ? round trip")
+}
+
 print("\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

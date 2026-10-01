@@ -8,6 +8,7 @@ import PriNotesCore
 /// - `onTrigger`: a character that can complete a Markdown pattern was typed.
 /// - `onActivity`: any key or click — the cursor may have moved (drives the live preview).
 /// - `onHotkey`: ⌃⌘E was pressed (swallowed).
+/// - `onFileLinkHotkey`: ⌃⌘K was pressed (swallowed).
 /// - `onEscape`: Esc was pressed (passed through to Notes).
 /// - `onUnderlineShortcut`: ⌘U was pressed; swallowed and handled by the app (see SelectionStyler).
 final class KeyMonitor {
@@ -15,10 +16,13 @@ final class KeyMonitor {
     static let syntheticMarker: Int64 = 0x4E4D_4421   // "NMD!"
     /// ⌃⌘E — toggle an equation between rendered and source form.
     static let hotkeyCode: Int64 = 14                  // kVK_ANSI_E
+    /// ⌃⌘K — link to a file or folder in iCloud Drive.
+    static let fileLinkHotkeyCode: Int64 = 40          // kVK_ANSI_K
 
     var onTrigger: (() -> Void)?
     var onActivity: (() -> Void)?
     var onHotkey: (() -> Void)?
+    var onFileLinkHotkey: (() -> Void)?
     /// Called when Notes stops being the frontmost app.
     var onNotesDeactivated: (() -> Void)?
     /// Called when Esc is pressed in Notes (the key still reaches Notes).
@@ -78,6 +82,11 @@ final class KeyMonitor {
         if modifiers == [.maskCommand, .maskControl],
            event.getIntegerValueField(.keyboardEventKeycode) == KeyMonitor.hotkeyCode {
             after(milliseconds: 0) { $0.onHotkey?() }
+            return true
+        }
+        if modifiers == [.maskCommand, .maskControl],
+           event.getIntegerValueField(.keyboardEventKeycode) == KeyMonitor.fileLinkHotkeyCode {
+            after(milliseconds: 0) { $0.onFileLinkHotkey?() }
             return true
         }
         if modifiers == [.maskCommand], event.getIntegerValueField(.keyboardEventKeycode) == 32 {   // ⌘U

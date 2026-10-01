@@ -449,6 +449,27 @@ paste(snippet):
     after 0.5 s: if pasteboard.changeCount is still ours → restore `saved`
 ```
 
+### 7.8 Links to real files: borrowing the iPhone's URL scheme
+
+Dragging a file into Notes copies it into the note. A link to the *original* has to work on two
+devices whose file systems differ. The trick is to write the link in the form the iPhone already
+understands and teach the Mac to read it:
+
+```text
+link   = "shareddocuments://" + percentEncode("/private/var/mobile/Library/Mobile Documents/" + rest)
+iPhone : the Files app owns the scheme and opens the item
+Mac    : nothing owns the scheme, so Pri Notes claims it (CFBundleURLTypes in Info.plist):
+         rest = path after ".../Mobile Documents/"; refuse "..", or anything outside
+         open("~/Library/Mobile Documents/" + rest)   (only reveal apps and scripts)
+```
+
+`Mobile Documents` has the same layout on both devices: `com~apple~CloudDocs` is iCloud Drive, and
+`iCloud~…` folders belong to apps. So the part after it is the same everywhere. When Notes is clicked
+on the Mac it hands the link to LaunchServices, which starts Pri Notes if needed and delivers it to
+`application(_:open:)`. Inserting a link opens a file picker, which takes focus from Notes; since
+Notes' menus only work while it is frontmost, Notes is brought back before pasting, and the paste is
+skipped if the note's text changed meanwhile.
+
 ---
 
 ## 8. Equation images: MathJax in a hidden browser
@@ -656,3 +677,9 @@ renderer and expects every one to be blocked.
     the Notes behaviours above, which reasoning alone got wrong more than once.
 12. **An unclosed delimiter has no end.** Anything that edits "from `$` to the end of the line" breaks
     as soon as the edit is mid-sentence. Remember what came after the edit point instead.
+13. **Borrow a URL scheme the other device already understands.** The iPhone's Files app opens
+    `shareddocuments://` links; the Mac had no handler, so the app became one. One link, both devices,
+    no server and nothing to install on the phone. Try candidate links by hand before writing code.
+14. **Two AX reads are not one snapshot.** The text and the selection are read separately, so while
+    Notes switches notes they can disagree. Check the range against the text before slicing it, or
+    AppKit raises an exception Swift can't catch.

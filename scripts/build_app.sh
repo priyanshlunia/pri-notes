@@ -42,6 +42,13 @@ cat > "$STAGE/Contents/Info.plist" <<EOF
     <key>CFBundleVersion</key><string>110</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSUIElement</key><true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>iCloud Drive file link</string>
+            <key>CFBundleURLSchemes</key><array><string>shareddocuments</string></array>
+        </dict>
+    </array>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>

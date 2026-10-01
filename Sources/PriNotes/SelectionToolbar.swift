@@ -21,7 +21,7 @@ final class ToolbarPanel: NSPanel {
 // MARK: - Toolbar
 
 /// Floating Liquid Glass toolbar shown above selected text in Notes:
-/// `[ Font ▾ | Typeface ▾ ]  [ B I U S ]  [ − 13 + ]  [ ● ▾ ]`
+/// `[ Font ▾ | Typeface ▾ ]  [ B I U S ]  [ − 13 + ]  [ ● ▾ ]  [ 🔗 ]`
 ///
 /// `update()` is called after every key or click in Notes. When text is selected it waits for a short
 /// pause, reads the selection's style (`SelectionStyler`) and shows the toolbar centred above it.
@@ -30,6 +30,8 @@ final class ToolbarPanel: NSPanel {
 @MainActor
 final class SelectionToolbar: NSObject, NSMenuDelegate {
     var isEnabled = true
+    /// The link button: turn the selection into a link to an iCloud Drive item (`FileLinkInserter`).
+    var onInsertFileLink: (() -> Void)?
 
     private let formatter: Formatter
     private let styler: SelectionStyler
@@ -136,11 +138,20 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         minus.toolTip = "Smaller"
         plus.toolTip = "Bigger"
 
+        let fileLink = FirstClickButton(image: NSImage(systemSymbolName: "link.badge.plus", accessibilityDescription: "Link to file")
+                                            ?? NSImage(systemSymbolName: "link", accessibilityDescription: "Link to file")!,
+                                        target: self, action: #selector(insertFileLink))
+        fileLink.isBordered = false
+        fileLink.contentTintColor = .labelColor
+        fileLink.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        fileLink.toolTip = "Link to a file or folder in iCloud Drive (⌃⌘K)"
+
         let glassViews = [
             glassGroup([familyPopUp, facePopUp], spacing: 0),
             glassGroup(toggles),
             glassGroup([minus, sizePopUp, plus]),
             glassGroup([colorPopUp]),
+            glassGroup([fileLink]),
         ]
         let row = NSView()
         glassViews.forEach(row.addSubview)
@@ -390,6 +401,12 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     @objc private func toggleStyle(_ sender: NSButton) {
         guard let raw = sender.identifier?.rawValue, let style = SelectionStyler.InlineStyleToggle(rawValue: raw) else { return }
         apply(.toggle(style))
+    }
+
+    /// The picker takes focus from Notes, so the toolbar is hidden first; it reappears for the new selection.
+    @objc private func insertFileLink() {
+        hide()
+        onInsertFileLink?()
     }
 
     @objc private func stepSize(_ sender: NSButton) { apply(.step(sender.tag)) }

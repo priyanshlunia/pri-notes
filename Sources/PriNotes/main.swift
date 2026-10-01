@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let formatter = Formatter()
     private lazy var preview = LivePreview(formatter: formatter)
     private lazy var toolbar = SelectionToolbar(formatter: formatter)
+    private lazy var fileLinks = FileLinkInserter(formatter: formatter)
     private var statusItem: NSStatusItem!
     private var permissionTimer: Timer?
     private let defaults = UserDefaults.standard
@@ -62,6 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.toolbar.styleChangedExternally()
             }
         }
+        monitor.onFileLinkHotkey = { [weak self] in
+            MainActor.assumeIsolated { self?.toolbar.hide(); self?.fileLinks.run() }
+        }
+        toolbar.onInsertFileLink = { [weak self] in self?.fileLinks.run() }
         monitor.onHotkey = { [weak self] in
             MainActor.assumeIsolated {
                 self?.formatter.toggleEquation()
@@ -88,6 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 timer.invalidate()
             }
         }
+    }
+
+    // MARK: - File links
+
+    /// `shareddocuments://` links clicked in Notes (or anywhere else) arrive here.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == FileLinks.scheme { FileLinkOpener.open(url) }
     }
 
     // MARK: - Settings
@@ -129,6 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hint = NSMenuItem(title: "⌃⌘E  edit equation / insert equation now", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
+        let linkHint = NSMenuItem(title: "⌃⌘K  link to an iCloud Drive file or folder", action: nil, keyEquivalent: "")
+        linkHint.isEnabled = false
+        menu.addItem(linkHint)
         if let error = formatter.lastError {
             menu.addItem(.separator())
             let e = NSMenuItem(title: "Last error: \(error)", action: nil, keyEquivalent: "")

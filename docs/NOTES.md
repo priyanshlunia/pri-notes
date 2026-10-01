@@ -1,4 +1,4 @@
-# Design notes: Pri Notes v1.1 (2026-09-30)
+# Design notes: Pri Notes v1.1 + iCloud file links (2026-10-01)
 
 A menu-bar app (LSUIElement) that adds Markdown, LaTeX math and a selection formatting toolbar to Apple
 Notes. It watches typing and drives Notes through the Accessibility (AX) API. It is fully
@@ -8,7 +8,8 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 ## How it works
 
 **Detection.** A CGEventTap runs while Notes is frontmost.
-- It is pass-through, except that it swallows ⌃⌘E (equation toggle) and ⌘U (reliable underline).
+- It is pass-through, except that it swallows ⌃⌘E (equation toggle), ⌃⌘K (file link) and ⌘U
+  (reliable underline).
 - 20 ms after a trigger character (`space * _ ~ $ \``) it reads the focused `AXTextArea`'s text and
   selection. `Rules.detect` then checks whether the text ending at the cursor completes a pattern.
 - Detection is stateless and line-local.
@@ -22,7 +23,7 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 | AX: set `AXSelectedTextRange`, then `AXSelectedText` (undoable) | removing Markdown markers, inserting equation and code text, retyping to remove underline |
 | AX-press a Format-menu item by title (English UI) | Title/Heading/…/Checklist, Bold/Italic/Underline **on**, Strikethrough, Bigger/Smaller, Baseline ▸ Superscript/Subscript |
 | **Paste Style**: a one-character RTF sample (`StyleSample.rtf`) on the *font* pasteboard, then Format ▸ Font ▸ Paste Style | fonts (Palatino, Menlo, toolbar family and typeface), exact sizes, colours, Bold/Italic on and off |
-| General clipboard + Edit ▸ Paste (restored after 0.5 s) | links, equation images |
+| General clipboard + Edit ▸ Paste (restored after 0.5 s) | links (Markdown and file links, via `Formatter.pasteLink`), equation images |
 
 `SelectionStyler.pasteStyles` applies styles run by run:
 - It waits until each run shows its new style, because Notes reads the font pasteboard after the menu
@@ -59,12 +60,36 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 - Text equations are found through `EquationStore`: `equations.json`, capped at 5,000 entries.
 
 **Selection toolbar.**
-- A never-key, non-activating `NSPanel` with four `NSGlassEffectView` capsules, laid out by hand.
+- A never-key, non-activating `NSPanel` with five `NSGlassEffectView` capsules, laid out by hand.
 - Controls accept the first click, so focus stays in Notes. It appears 0.3 s after a key or click that
   leaves a selection, and isn't rebuilt while its menus are open.
 - It reads style runs from `AXAttributedStringForRange`.
 - Font, typeface and B/I skip equations (a Palatino stretch followed by U+200B). Colour, size and U/S
   apply to them.
+- A fifth capsule holds the 🔗 file-link button, which hides the toolbar and runs `FileLinkInserter`.
+
+**iCloud Drive file links (`shareddocuments://`).**
+- Links hold the item's **iPhone** path, percent-encoded:
+  `shareddocuments:///private/var/mobile/Library/Mobile%20Documents/com~apple~CloudDocs/<path>`.
+  The iPhone's Files app owns the scheme. `Mobile Documents` has the same layout on the Mac
+  (`~/Library/Mobile Documents`), so `FileLinks` (core, selftested) maps one path to the other.
+- macOS had no handler for the scheme, so `CFBundleURLTypes` in `build_app.sh` registers Pri Notes.
+  Clicks arrive at `application(_:open:)`, which calls `FileLinkOpener`.
+  - It opens folders in Finder and documents in their default app.
+  - It only reveals apps, scripts, executables and location files: shared notes can carry links.
+  - `FileLinks.macPath` refuses `..`, the host form, and anything outside `Mobile Documents`.
+  - A missing target gets an alert. Renames and moves break links; the user accepted that.
+- Inserting (`FileLinkInserter`, ⌃⌘K or 🔗):
+  1. Save the context.
+  2. Show an `NSOpenPanel` that starts in iCloud Drive. It alerts while still frontmost if the item
+     is outside `Mobile Documents`.
+  3. `styler.ensureNotesFrontmost()`.
+  4. Paste only if the note's text is unchanged.
+
+  A selection becomes the link with no trailing space. Otherwise the display name is inserted plus a
+  plain space.
+- Rejected alternatives: Shortcuts links (a shortcut per device, a visible app hop), iCloud share
+  links (network, server-side sharing), `file://` and bookmarks (Mac only).
 
 ## Notes behaviours worth knowing
 
@@ -90,6 +115,13 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 - **The system font:** Notes stores it as bold/italic only, so Semibold becomes Bold. The typeface
   menu offers only Regular, Italic, Bold and Bold Italic.
 - **Remove Style:** resets the whole paragraph, so it isn't used.
+- **`shareddocuments://` links:** Notes keeps them clickable on the Mac and after syncing to the iPhone,
+  and the Mac hands clicks to LaunchServices. On iPhone they open folders and files, including
+  percent-encoded spaces and accents, `/var/…` without `/private`, and app containers. `file://` does
+  nothing on iPhone. (Verified by hand, 2026-10-01.)
+- **Text and selection can disagree:** they are separate AX reads, and while Notes switches notes the
+  selection can run past the text (seen: {1008, 4} against 873 units). `currentContext()` rejects the
+  pair; slicing would raise an uncatchable exception (this crashed the app on 2026-10-01).
 
 ## Privacy, resources and identity
 
@@ -114,8 +146,9 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 
 ## Verification
 
-- **Self-tests:** `swift run selftest` passes 184/184. It covers rules, math spans, LaTeX examples,
-  rich and Unicode runs, style-sample RTF round trips (exact sRGB), and script sizes.
+- **Self-tests:** `swift run selftest` passes 196/196. It covers rules, math spans, LaTeX examples,
+  rich and Unicode runs, style-sample RTF round trips (exact sRGB), script sizes, and file-link
+  mapping and its safety checks.
 - **In Notes:** `--notes-lab` in a note starting "PRI-LAB":
   - `--phase3`: every toolbar change;
   - `--phase4`: equations after styled text, Palatino kept, colour matched exactly;
@@ -125,7 +158,9 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 - **Offline checks:** `--render`, `--preview-snapshot`, `--toolbar-snapshot`, `--menubar-icon`,
   `--network-test`, `--recover-from-clipboard`.
 - **Confirmed in use:** Markdown, text math, image re-editing, the glass toolbar and preview, and U/⌘U
-  on and off.
+  on and off. File links (2026-10-01): inserting at the cursor and over a selection, cancel,
+  the outside-iCloud alert, typing after a link, and clicks on Mac (also with the app not running)
+  and iPhone.
 - **Not yet confirmed:**
   - doubly nested scripts (`x^{a^b}`);
   - an image equation after the appearance changes.
@@ -139,3 +174,4 @@ For a guided walkthrough with diagrams, see [learnings.md](learnings.md).
 - Underlined links keep their underline. Text right after an underlined character re-inherits the
   underline when it is retyped.
 - Menu titles are matched in English.
+- File links break when the item is renamed or moved. Only items in iCloud folders can be linked.

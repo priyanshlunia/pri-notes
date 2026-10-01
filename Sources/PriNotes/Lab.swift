@@ -16,6 +16,10 @@ import PriNotesCore
 /// - `--phase7`: B/I/U/S toggles on and off, keeping font and colour.
 /// - `--phase8`: ⌃⌘E on text equations mid-sentence (any equation, span stops at the sentence),
 ///   and no zero-width marker in stored sources.
+/// - `--phase9`: open questions: doubly nested scripts, typing after `**bold**` / `*italic*`, and
+///   ⌘B / ⌘I from the keyboard switching off again.
+/// - `--phase10`: smart symbols, typing after `**bold**`, switching an equation text ↔ image, and
+///   copying it as LaTeX / MathML (uses the clipboard).
 /// Findings are recorded in docs/NOTES.md.
 @MainActor
 enum NotesLab {
@@ -132,6 +136,128 @@ enum NotesLab {
             toggle(.strikethrough, "epsilon"); out("  on  → \(state("epsilon"))")
             toggle(.strikethrough, "epsilon"); out("  off → \(state("epsilon"))")
             out("text intact: \((ax.value(of: el) ?? "").hasSuffix(testLine))")
+            finish(0)
+        }
+
+        if CommandLine.arguments.contains("--phase9") || CommandLine.arguments.contains("--phase10") {
+            // Open questions: doubly nested scripts, whether typing continues in bold/italic after a
+            // `**bold**` / `*italic*` conversion, and whether the keyboard's ⌘B / ⌘I switch off again.
+            // Typing uses real key events through the HID tap (as a person typing would), not AX
+            // inserts, because AX inserts take the preceding character's style regardless of the
+            // typing style.
+            let formatter = Formatter()
+            func text() -> NSString { ax.value(of: el) ?? "" }
+            func append(_ s: String) {
+                let end = text().length
+                ax.replace(in: el, range: NSRange(location: end, length: 0), with: s)
+                ax.setSelectedRange(of: el, NSRange(location: end + (s as NSString).length, length: 0))
+                pause(0.15)
+            }
+            func type(_ s: String) {
+                let src = CGEventSource(stateID: .hidSystemState)
+                for ch in s.utf16 {
+                    for down in [true, false] {
+                        guard let e = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: down) else { continue }
+                        var c = ch
+                        e.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c)
+                        e.post(tap: .cghidEventTap)
+                    }
+                    pause(0.04)
+                }
+                pause(0.3)
+            }
+            func shortcut(_ keyCode: CGKeyCode) {
+                let src = CGEventSource(stateID: .hidSystemState)
+                for down in [true, false] {
+                    guard let e = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: down) else { continue }
+                    e.flags = .maskCommand
+                    e.post(tap: .cghidEventTap)
+                }
+                pause(0.3)
+            }
+            func lastLine() -> NSRange {
+                let t = text()
+                let start = t.range(of: "\n", options: .backwards).location + 1
+                return NSRange(location: start, length: t.length - start)
+            }
+            ax.replace(in: el, range: NSRange(location: base, length: text().length - base), with: "")
+
+            if CommandLine.arguments.contains("--phase10") {
+                // Smart symbols, typing after **bold** (now through a zero-width space), switching an
+                // equation between text and image (⌃⌘⇧E), and copying it as LaTeX / MathML.
+                // Uses the clipboard.
+                func line() -> String { text().substring(with: lastLine()).debugDescription }
+                let pb = NSPasteboard.general
+
+                out("== A. smart symbols (converted on the space)")
+                for typed in ["a -> ", "p <=> ", "x != ", "1/2 ", "wait... ", "x->y ", "$a -> "] {
+                    append("\n" + typed); formatter.check(); pause(0.3)
+                    out("  \(typed.debugDescription) → \(line())  cursor at end: \(ax.selectedRange(of: el)?.location == text().length)")
+                }
+
+                out("== B. typing after **bold** and *ital* (real keystrokes)")
+                for md in ["**bold**", "*ital*"] {
+                    append("\n" + md); formatter.check(); pause(0.8)
+                    type(" next")
+                    out("  " + describe(lastLine()))
+                }
+
+                out("== C. switch a text equation to an image and back (⌃⌘⇧E)")
+                append("\n$x_b^2$"); formatter.check(); pause(0.8)
+                out("  text:       \(line())")
+                pb.clearContents()
+                formatter.copyEquation(.latex); pause(0.3)
+                out("  copy LaTeX: \(pb.string(forType: .string).debugDescription)")
+                formatter.switchEquationForm(); pause(2.5)
+                out("  image:      \(line())")
+                pb.clearContents()
+                formatter.copyEquation(.latex); pause(2.0)
+                out("  copy LaTeX: \(pb.string(forType: .string).debugDescription)")
+                pb.clearContents()
+                formatter.copyEquation(.mathML); pause(2.5)
+                out("  copy MathML: \((pb.string(forType: .string) ?? "nil").replacingOccurrences(of: "\n", with: " "))")
+                func tail() -> String {
+                    let t = text(); let from = max(0, t.length - 6)
+                    return t.substring(from: from).unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
+                }
+                out("  note tail: \(tail())  cursor \(ax.selectedRange(of: el).map { "\($0)" } ?? "?") of \(text().length)")
+                let image = text().range(of: "\u{FFFC}", options: .backwards)
+                ax.setSelectedRange(of: el, image); pause(0.2)
+                out("  selected the image at \(image.location)")
+                formatter.switchEquationForm(); pause(1.0)
+                out("  text again: \(line())  tail: \(tail())")
+                out("  runs: " + describe(lastLine()))
+                out("  last error: \(formatter.lastError ?? "none")")
+                finish(0)
+            }
+
+            out("== A. doubly nested scripts")
+            for latex in ["x^{a^b}", "y_{i_j}", "e^{-x^2}"] {
+                append("\n$\(latex)$"); formatter.check(); pause(1.0)
+                out("  \(latex): " + describe(lastLine()))
+            }
+
+            out("== B. typing after a Markdown conversion (real keystrokes)")
+            for (md, label) in [("**bold**", "bold"), ("*ital*", "italic")] {
+                append("\n" + md); formatter.check(); pause(0.8)
+                type(" next")
+                out("  \(label): " + describe(lastLine()))
+            }
+
+            out("== C. ⌘B / ⌘I from the keyboard on a selection (pressed twice)")
+            append("\nkey test words")
+            let line = lastLine()
+            for (w, code, label) in [("key", CGKeyCode(11), "⌘B"), ("test", CGKeyCode(34), "⌘I")] {
+                let r = NSRange(location: line.location + (text().substring(with: line) as NSString).range(of: w).location, length: (w as NSString).length)
+                ax.setSelectedRange(of: el, r); pause(0.2)
+                shortcut(code); out("  \(label) once:  " + describe(r))
+                shortcut(code); out("  \(label) twice: " + describe(r))
+            }
+
+            out("== D. ⌘B as a typing style (no selection): ⌘B, type, ⌘B, type")
+            append("\nplain ")
+            shortcut(11); type("on"); shortcut(11); type(" off")
+            out("  " + describe(lastLine()))
             finish(0)
         }
 

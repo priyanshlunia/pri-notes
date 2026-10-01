@@ -66,6 +66,19 @@
     ctx.drawImage(img, pad * scale, pad * scale, w * scale, h * scale);
     return { png: canvas.toDataURL('image/png'), width: W, height: H };
   }
+
+  /**
+   * Convert `tex` to MathML (a <math> element as a string), for copying out of Notes.
+   *   display – true for a block equation (display="block"), false for inline
+   */
+  async function texToMathML(tex, display) {
+    await MathJax.startup.promise;
+    try {
+      return MathJax.tex2mml(tex, { display: display });
+    } catch (e) {
+      throw new Error(e && e.message ? e.message : String(e));
+    }
+  }
 </script>
 <script src="tex-svg-full.js"></script>
 </head>

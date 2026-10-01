@@ -155,6 +155,32 @@ final class MathRenderer {
         return Equation(png: png, size: CGSize(width: width, height: height))
     }
 
+    /// Convert `latex` to MathML with the bundled MathJax (offline, like `render`).
+    ///
+    /// Example:
+    /// ```swift
+    /// let mml = try await renderer.mathML("x_b^2", display: false)
+    /// // "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">\n  <msubsup>…"
+    /// ```
+    func mathML(_ latex: String, display: Bool) async throws -> String {
+        guard MathRenderer.resourceDirectory() != nil else { throw RenderError.resourcesMissing }
+        if !loaded { await withCheckedContinuation { waiters.append($0) } }
+        do {
+            let result = try await webView.callAsyncJavaScript(
+                "return await texToMathML(tex, display);",
+                arguments: ["tex": latex, "display": display], contentWorld: .page)
+            guard let mml = result as? String else { throw RenderError.badResult }
+            return mml
+        } catch let error as RenderError {
+            throw error
+        } catch {
+            let ns = error as NSError
+            var message = ns.userInfo["WKJavaScriptExceptionMessage"] as? String ?? ns.localizedDescription
+            if message.hasPrefix("Error: ") { message.removeFirst("Error: ".count) }
+            throw RenderError.latex(message)
+        }
+    }
+
     /// Prefix of the PNG description that marks an equation made by this app.
     static let sourceTag = "prinotes-latex:"
 

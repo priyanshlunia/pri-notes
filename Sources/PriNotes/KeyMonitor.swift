@@ -8,6 +8,7 @@ import PriNotesCore
 /// - `onTrigger`: a character that can complete a Markdown pattern was typed.
 /// - `onActivity`: any key or click — the cursor may have moved (drives the live preview).
 /// - `onHotkey`: ⌃⌘E was pressed (swallowed).
+/// - `onSwitchFormHotkey`: ⌃⌘⇧E was pressed (swallowed).
 /// - `onFileLinkHotkey`: ⌃⌘K was pressed (swallowed).
 /// - `onEscape`: Esc was pressed (passed through to Notes).
 /// - `onUnderlineShortcut`: ⌘U was pressed; swallowed and handled by the app (see SelectionStyler).
@@ -22,6 +23,8 @@ final class KeyMonitor {
     var onTrigger: (() -> Void)?
     var onActivity: (() -> Void)?
     var onHotkey: (() -> Void)?
+    /// ⌃⌘⇧E: switch an equation between text and image (same key as ⌃⌘E, plus Shift).
+    var onSwitchFormHotkey: (() -> Void)?
     var onFileLinkHotkey: (() -> Void)?
     /// Called when Notes stops being the frontmost app.
     var onNotesDeactivated: (() -> Void)?
@@ -82,6 +85,11 @@ final class KeyMonitor {
         if modifiers == [.maskCommand, .maskControl],
            event.getIntegerValueField(.keyboardEventKeycode) == KeyMonitor.hotkeyCode {
             after(milliseconds: 0) { $0.onHotkey?() }
+            return true
+        }
+        if modifiers == [.maskCommand, .maskControl, .maskShift],
+           event.getIntegerValueField(.keyboardEventKeycode) == KeyMonitor.hotkeyCode {
+            after(milliseconds: 0) { $0.onSwitchFormHotkey?() }
             return true
         }
         if modifiers == [.maskCommand, .maskControl],

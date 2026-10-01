@@ -21,7 +21,11 @@ final class ToolbarPanel: NSPanel {
 // MARK: - Toolbar
 
 /// Floating Liquid Glass toolbar shown above selected text in Notes:
-/// `[ Font ▾ | Typeface ▾ ]  [ B I U S ]  [ − 13 + ]  [ ● ▾ ]  [ 🔗 ]`
+/// `[ Font ▾ | Typeface ▾ ]  [ B I U S ]  [ − 13 + ]  [ ● ▾ ]  [ 🔗 ]  [ ∑ ▾ ]`
+///
+/// The ∑ capsule appears only when the selection is a converted equation: it switches the equation
+/// between text and image and copies it as LaTeX or MathML. A selected image shows the ∑ capsule
+/// alone, since the style controls don't apply to it.
 ///
 /// `update()` is called after every key or click in Notes. When text is selected it waits for a short
 /// pause, reads the selection's style (`SelectionStyler`) and shows the toolbar centred above it.
@@ -49,6 +53,9 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     private let facePopUp = FirstClickPopUp(frame: .zero, pullsDown: true)
     private let sizePopUp = FirstClickPopUp(frame: .zero, pullsDown: true)
     private let colorPopUp = FirstClickPopUp(frame: .zero, pullsDown: true)
+    private let equationPopUp = FirstClickPopUp(frame: .zero, pullsDown: true)
+    /// The ∑ capsule, shown only for equations; the other capsules are hidden for a selected image.
+    private var equationGlass: NSGlassEffectView!
     private var toggleButtons: [SelectionStyler.InlineStyleToggle: FirstClickButton] = [:]
     private var groups: [(glass: NSGlassEffectView, stack: NSStackView)] = []
     private let container = NSGlassEffectContainerView()
@@ -146,13 +153,21 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         fileLink.widthAnchor.constraint(equalToConstant: 24).isActive = true
         fileLink.toolTip = "Link to a file or folder in iCloud Drive (⌃⌘K)"
 
+        equationPopUp.isBordered = false
+        equationPopUp.font = .systemFont(ofSize: 14)
+        equationPopUp.target = self
+        equationPopUp.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        equationPopUp.toolTip = "Equation: switch text ↔ image (⌃⌘⇧E), copy as LaTeX or MathML"
+
         let glassViews = [
             glassGroup([familyPopUp, facePopUp], spacing: 0),
             glassGroup(toggles),
             glassGroup([minus, sizePopUp, plus]),
             glassGroup([colorPopUp]),
             glassGroup([fileLink]),
+            glassGroup([equationPopUp]),
         ]
+        equationGlass = glassViews.last
         let row = NSView()
         glassViews.forEach(row.addSubview)
         container.spacing = Self.groupSpacing
@@ -168,9 +183,10 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         let m = Self.outerMargin
         var x = m
         var height: CGFloat = 0
-        for (_, stack) in groups { height = max(height, ceil(stack.fittingSize.height)) }
+        let visible = groups.filter { !$0.glass.isHidden }
+        for (_, stack) in visible { height = max(height, ceil(stack.fittingSize.height)) }
         height = max(height, 28)
-        for (glass, stack) in groups {
+        for (glass, stack) in visible {
             let width = ceil(stack.fittingSize.width)
             glass.frame = NSRect(x: x, y: m, width: width, height: height)
             glass.cornerRadius = height / 2          // capsule
@@ -225,14 +241,23 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         if sel == dismissedSelection { return }
         dismissedSelection = nil
         let selectedText = ctx.text.substring(with: sel)
-        guard selectedText.contains(where: { !$0.isWhitespace && $0 != "\u{FFFC}" }) else { return hide() }
+        let form = formatter.selectedEquationForm(in: ctx)
+        let hasText = selectedText.contains(where: { !$0.isWhitespace && $0 != "\u{FFFC}" && $0 != "\u{200B}" })
+        guard hasText || form == .image else { return hide() }
 
         guard let bounds = ctx.ax.bounds(of: ctx.element, range: sel) else { return hide() }
         if !force, panel.isVisible, sel == selection { return position(above: bounds) }
-        let runs = styler.runs(in: sel, ax: ctx.ax, el: ctx.element)
-        guard let summary = styler.summary(of: runs) else { return hide() }
+        if form == .image {
+            // A selected image: only the ∑ capsule.
+            for (glass, _) in groups { glass.isHidden = glass !== equationGlass }
+        } else {
+            let runs = styler.runs(in: sel, ax: ctx.ax, el: ctx.element)
+            guard let summary = styler.summary(of: runs) else { return hide() }
+            for (glass, _) in groups { glass.isHidden = glass === equationGlass && form == nil }
+            refresh(with: summary)
+        }
         selection = sel
-        refresh(with: summary)
+        equationPopUp.menu = equationMenu(form: form)
         panel.setContentSize(layoutGroups())
         position(above: bounds)
         panel.orderFrontRegardless()
@@ -254,6 +279,8 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     /// Debug: the toolbar content filled for `summary`, sized to fit (for `--toolbar-snapshot`).
     func debugContentView(for summary: SelectionStyler.Summary) -> NSView {
         refresh(with: summary)
+        equationPopUp.menu = equationMenu(form: .text)
+        for (glass, _) in groups { glass.isHidden = false }
         let view = panel.contentView!
         view.setFrameSize(layoutGroups())
         return view
@@ -289,6 +316,15 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         i.representedObject = object
         i.state = checked ? .on : .off
         return i
+    }
+
+    private func equationMenu(form: Formatter.EquationForm?) -> NSMenu {
+        titled("∑", [
+            item(form == .image ? "Switch to Text Equation  ($…$)" : "Switch to Image Equation  ($$…$$)",
+                 #selector(switchEquationForm), nil),
+            item("Copy LaTeX", #selector(copyEquation(_:)), "latex"),
+            item("Copy MathML", #selector(copyEquation(_:)), "mathML"),
+        ])
     }
 
     private func familyMenu(current: String?) -> NSMenu {
@@ -410,6 +446,21 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     }
 
     @objc private func stepSize(_ sender: NSButton) { apply(.step(sender.tag)) }
+
+    /// The equation is replaced, so the selection is gone: hide until the next selection.
+    @objc private func switchEquationForm() {
+        menuOpen = false
+        hide()
+        formatter.switchEquationForm()
+    }
+
+    @objc private func copyEquation(_ sender: NSMenuItem) {
+        menuOpen = false
+        guard let sel = selection else { return }
+        formatter.copyEquation(sender.representedObject as? String == "mathML" ? .mathML : .latex)
+        // Copying an image moves the cursor after it; put the selection back.
+        if let ctx = formatter.currentContext() { ctx.ax.setSelectedRange(of: ctx.element, sel) }
+    }
 
     @objc private func pickFamily(_ sender: NSMenuItem) {
         if let family = sender.representedObject as? String { apply(.family(family)) }

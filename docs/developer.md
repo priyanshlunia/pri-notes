@@ -29,6 +29,8 @@ Debug modes of that build. None of them touch Notes:
   panel to a PNG.
 - `.build/debug/PriNotes --menubar-icon out.png [pt]` draws the menu-bar icon.
 - `.build/debug/PriNotes --network-test` checks that the renderer can't reach the network.
+- `.build/debug/PriNotes --mathml '<latex>' [--display]` prints the MathML that the toolbar's Copy MathML
+  would copy.
 - `.build/debug/PriNotes --recover-from-clipboard`: after copying an equation image in Notes, runs the
   ⌃⌘E recovery code on the clipboard and prints the LaTeX it finds.
 - `.build/debug/PriNotes --toolbar-snapshot out.png [--dark]` draws the selection toolbar's controls.
@@ -46,6 +48,9 @@ open -n ~/Applications/Pri\ Notes.app --args --notes-lab /tmp/lab.txt --phase3
 - `--phase4`: equations after styled text, and colour matching.
 - `--phase7`: B/I/U/S on and off.
 - `--phase8`: ⌃⌘E on text equations mid-sentence.
+- `--phase9`: doubly nested scripts, typing after `**bold**`, and ⌘B/⌘I from the keyboard.
+- `--phase10`: smart symbols, typing after `**bold**`, switching an equation text ↔ image, and
+  Copy LaTeX/MathML. It uses the clipboard.
 
 Read the report in `/tmp/lab.txt` afterwards.
 

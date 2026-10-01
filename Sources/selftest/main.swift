@@ -63,6 +63,24 @@ check(detect("$(a)_1 + (b)_") == nil, "underscores inside open math are not ital
 check(detect("$a*b*") == nil, "stars inside open math are not italic")
 check(detect("$x$ and *it*") == .inline(.italic, matchRange: r(8, 4), inner: "it"), "italic after closed math")
 
+// MARK: - Smart symbols
+check(detect("a -> ") == .symbol(matchRange: r(2, 2), replacement: "→"), "-> on space")
+check(detect("-> ") == .symbol(matchRange: r(0, 2), replacement: "→"), "at line start")
+check(detect("a <-> ") == .symbol(matchRange: r(2, 3), replacement: "↔"), "<-> beats <-")
+check(detect("p <=> ") == .symbol(matchRange: r(2, 3), replacement: "⇔"), "<=> beats <= and =>")
+check(detect("x <= ") == .symbol(matchRange: r(2, 2), replacement: "≤"), "<=")
+check(detect("x != ") == .symbol(matchRange: r(2, 2), replacement: "≠"), "!=")
+check(detect("5 +- ") == .symbol(matchRange: r(2, 2), replacement: "±"), "+-")
+check(detect("1/2 ") == .symbol(matchRange: r(0, 3), replacement: "½"), "fraction")
+check(detect("11/2 ") == nil, "fraction inside a number")
+check(detect("1/25 ") == nil, "longer fraction")
+check(detect("x->y ") == nil, "arrow inside a word")
+check(detect("a->") == nil, "waits for the space")
+check(detect("wait... ") == .symbol(matchRange: r(4, 3), replacement: "…"), "ellipsis after a word")
+check(detect("wait.... ") == nil, "four dots")
+check(detect("$a -> ") == nil, "not inside math")
+check(detect("a -> ", [.inline]) == nil, "symbols disabled")
+
 // MARK: - Math spans (live preview)
 do {
     let t = "so $x_1 + y" as NSString

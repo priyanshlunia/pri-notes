@@ -20,7 +20,8 @@ public struct RuleSet: OptionSet {
     public static let links        = RuleSet(rawValue: 1 << 2)
     public static let unicodeMath  = RuleSet(rawValue: 1 << 3)
     public static let renderedMath = RuleSet(rawValue: 1 << 4)
-    public static let all: RuleSet = [.blocks, .inline, .links, .unicodeMath, .renderedMath]
+    public static let symbols      = RuleSet(rawValue: 1 << 5)
+    public static let all: RuleSet = [.blocks, .inline, .links, .unicodeMath, .renderedMath, .symbols]
 }
 
 /// What to do to the note once a Markdown pattern has been completed.
@@ -40,6 +41,8 @@ public enum Action: Equatable {
     case unicodeMath(matchRange: NSRange, latex: String)
     /// Replace `matchRange` ("$$…$$") with a typeset image.
     case renderedMath(matchRange: NSRange, latex: String)
+    /// Replace `matchRange` (e.g. "->", without the space typed after it) with `replacement` ("→").
+    case symbol(matchRange: NSRange, replacement: String)
 }
 
 /// Detects completed Markdown patterns immediately before the insertion point.
@@ -61,6 +64,15 @@ public enum Rules {
     /// Characters whose keystroke can complete a pattern. Other keystrokes are ignored
     /// without touching the Accessibility API.
     public static let triggerCharacters: Set<Character> = [" ", "*", "_", "~", "$", "`"]
+
+    /// Smart symbols typed outside math, converted on the space after them. Longer sequences come
+    /// first so "<->" isn't read as "<-" followed by ">".
+    public static let symbols: [(sequence: String, symbol: String)] = [
+        ("<->", "↔"), ("<=>", "⇔"), ("->", "→"), ("<-", "←"), ("=>", "⇒"),
+        ("<=", "≤"), (">=", "≥"), ("!=", "≠"), ("+-", "±"), ("-+", "∓"), ("~=", "≈"),
+        ("1/2", "½"), ("1/3", "⅓"), ("2/3", "⅔"), ("1/4", "¼"), ("3/4", "¾"),
+        ("...", "…"),
+    ]
 
     private struct Pattern {
         let family: RuleSet
@@ -87,6 +99,16 @@ public enum Rules {
         func inlinePattern(_ regex: String, _ style: InlineStyle) -> Pattern {
             Pattern(family: .inline, regex: re(regex)) { m, line, start in
                 .inline(style, matchRange: shift(m.range, start), inner: line.substring(with: m.range(at: 1)))
+            }
+        }
+
+        func symbolPattern() -> Pattern {
+            let escaped = symbols.filter { $0.sequence != "..." }
+                .map { NSRegularExpression.escapedPattern(for: $0.sequence) }.joined(separator: "|")
+            let table = Dictionary(uniqueKeysWithValues: symbols.map { ($0.sequence, $0.symbol) })
+            return Pattern(family: .symbols, regex: re("(?:(?:^|(?<=\\s))(" + escaped + ")|(?<!\\.)(\\.\\.\\.)) $")) { m, line, start in
+                let group = m.range(at: 1).location != NSNotFound ? m.range(at: 1) : m.range(at: 2)
+                return .symbol(matchRange: shift(group, start), replacement: table[line.substring(with: group)]!)
             }
         }
 
@@ -128,6 +150,10 @@ public enum Rules {
             inlinePattern(#"(?<![\w~\\])~~(?=\S)((?:(?!~~).)+?)(?<=\S)~~$"#, .strikethrough),
             inlinePattern(#"(?<![\w*\\])\*(?=[^\s*])([^*]*?[^\s*])\*$"#, .italic),
             inlinePattern(#"(?<![\w_\\])_(?=[^\s_])([^_]*?[^\s_])_$"#, .italic),
+
+            // --- Smart symbols, on the space after them. A sequence must start a word ("a -> b",
+            // not "x->y" or "11/2"), except "..." which usually follows one ("wait... ").
+            symbolPattern(),
         ]
     }()
 

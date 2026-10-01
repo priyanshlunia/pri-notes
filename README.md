@@ -28,6 +28,11 @@ folders that open on both your Mac and your iPhone. Fully offline. Modelled on t
 Conversions happen the moment the closing marker is typed (code and links: on the following
 space). **⌘Z** undoes a conversion. Nothing is converted inside monostyled paragraphs.
 
+**Smart symbols** convert on the space after them, outside math and code: `->` →, `<-` ←, `<->` ↔,
+`=>` ⇒, `<=>` ⇔, `<=` ≤, `>=` ≥, `!=` ≠, `+-` ±, `-+` ∓, `~=` ≈, `...` …, and `1/2` `1/3` `2/3`
+`1/4` `3/4` as ½ ⅓ ⅔ ¼ ¾. A sequence must start a word (`x->y` is left alone), except `...`. Turn
+them off with "Smart symbols" in the menu-bar menu.
+
 LaTeX that fails to parse (e.g. `$$\frac{a}{$$`) is left as text; the app beeps and shows the error
 in its menu. `$$…$$` supports AMS math plus `physics`, `braket`, `mathtools`, `cancel`, `color`.
 
@@ -42,6 +47,11 @@ in its menu. `$$…$$` supports AMS math plus `physics`, `braket`, `mathtools`, 
   LaTeX in the PNG metadata. Any text equation can be reopened, with the cursor on either side of
   the invisible character that follows it. In the middle of a sentence only the equation is edited:
   the rest of the sentence stays outside it, in the preview and when it converts.
+- **Text ↔ image:** **⌃⌘⇧E** switches the equation at the cursor (or selected) between a text
+  equation and an image, keeping its LaTeX. The toolbar's ∑ menu does the same.
+- **Copy as LaTeX or MathML:** select an equation and use the toolbar's ∑ menu. LaTeX is copied
+  with Markdown delimiters (`$x_b^2$`, `$$…$$`), which paste into Overleaf, Markdown editors and
+  back into Notes. MathML comes from the bundled MathJax.
 - **Dark mode:** equation images have a transparent background and are drawn in white or black to
   match the appearance *at the time they are inserted*. After switching appearance, ⌃⌘E twice
   re-renders one in the new colour.
@@ -58,7 +68,7 @@ in its menu. `$$…$$` supports AMS math plus `physics`, `braket`, `mathtools`, 
 
 Select text in a note and, after a short pause, a Liquid Glass toolbar appears above it:
 
-`[ Font ▾ | Typeface ▾ ]  [ B  I  U  S ]  [ −  size ▾  + ]  [ colour ▾ ]  [ 🔗 ]`
+`[ Font ▾ | Typeface ▾ ]  [ B  I  U  S ]  [ −  size ▾  + ]  [ colour ▾ ]  [ 🔗 ]  [ ∑ ▾ ]`
 
 - **Font:** a curated list (System, Palatino, Helvetica Neue, Avenir Next, Georgia, Times New Roman,
   Baskerville, Menlo, SF Mono), plus **All Fonts**. Each word keeps its own bold/italic and size.
@@ -76,6 +86,9 @@ Select text in a note and, after a short pause, a Liquid Glass toolbar appears a
   and size apply to them, so they match the surrounding text. New equations also take the colour
   and size of the text you type them into.
 - **🔗 Link to file:** turns the selection into a link to a file or folder in iCloud Drive (see below).
+- **∑ Equation** (only when an equation is selected): switch it between text and image, or copy
+  it as LaTeX or MathML. A selected image shows only this button; for an image that isn't a
+  Pri Notes equation, the app reports that no LaTeX was found.
 
 It hides when the selection is cleared, when you press Esc, or when Notes goes to the background.
 Turn it off with "Selection toolbar" in the menu-bar menu. Changes use Notes' own commands
@@ -119,8 +132,9 @@ Pri Notes is fully offline and keeps everything on this Mac.
   WebKit's compiled block list. WebKit uses a non-persistent data store, so no caches or cookies.
 - **What it sees:** macOS delivers every keystroke to the key tap, but it returns immediately unless Notes
   is frontmost, and nothing is recorded. While Notes is frontmost it reads the current note's text through
-  Accessibility (in memory only) to find Markdown/math patterns. The clipboard is used only to insert
-  links and equation images, and it is restored 0.5 s later. Fonts and colours go through the separate
+  Accessibility (in memory only) to find Markdown/math patterns. The clipboard is used to insert
+  links and equation images and to read an equation image's LaTeX, and it is restored afterwards.
+  Copy LaTeX / Copy MathML replace it, as any Copy does. Fonts and colours go through the separate
   font pasteboard, which is also restored.
 - **File links:** opening one is a local file operation. Pri Notes only accepts paths inside
   `~/Library/Mobile Documents` (your iCloud folders) and makes no network requests; iCloud itself does

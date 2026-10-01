@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ("Links  [text](url)", .links, "rules.links"),
         ("$…$  →  text equation", .unicodeMath, "rules.unicodeMath"),
         ("$$…$$  →  equation image", .renderedMath, "rules.renderedMath"),
+        ("Smart symbols  (-> ≤ ≠ ± … ½)", .symbols, "rules.symbols"),
     ]
 
     /// (menu title, defaults key) for the math options.
@@ -71,6 +72,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated {
                 self?.formatter.toggleEquation()
                 self?.preview.update()
+            }
+        }
+        monitor.onSwitchFormHotkey = { [weak self] in
+            MainActor.assumeIsolated {
+                self?.toolbar.hide()
+                self?.formatter.switchEquationForm()
             }
         }
         monitor.onNotesDeactivated = { [weak self] in
@@ -141,6 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hint = NSMenuItem(title: "⌃⌘E  edit equation / insert equation now", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
+        let switchHint = NSMenuItem(title: "⌃⌘⇧E  switch equation between text and image", action: nil, keyEquivalent: "")
+        switchHint.isEnabled = false
+        menu.addItem(switchHint)
         let linkHint = NSMenuItem(title: "⌃⌘K  link to an iCloud Drive file or folder", action: nil, keyEquivalent: "")
         linkHint.isEnabled = false
         menu.addItem(linkHint)
@@ -245,6 +255,24 @@ func previewSnapshot(_ args: [String]) {
     NSApplication.shared.run()
 }
 
+/// Debug mode: `PriNotes --mathml '<latex>' [--display]` prints the MathML that the ∑ menu's
+/// Copy MathML would put on the clipboard, and exits.
+@MainActor
+func printMathML(_ args: [String]) {
+    guard args.count >= 2 else { print("usage: PriNotes --mathml '<latex>' [--display]"); exit(2) }
+    let renderer = MathRenderer()
+    Task { @MainActor in
+        do {
+            print(try await renderer.mathML(args[1], display: args.contains("--display")))
+            exit(0)
+        } catch {
+            print("error: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    NSApplication.shared.run()
+}
+
 /// Debug mode: `PriNotes --network-test` tries to reach the internet from inside the equation
 /// renderer (fetch, image, script) and prints whether each attempt was blocked. Exit 0 = all blocked.
 @MainActor
@@ -315,6 +343,7 @@ func toolbarSnapshot(_ args: [String]) -> Never {
 
 MainActor.assumeIsolated {
     if CommandLine.arguments.contains("--network-test") { networkTest() }
+    if let i = CommandLine.arguments.firstIndex(of: "--mathml") { printMathML(Array(CommandLine.arguments[i...])) }
     if let i = CommandLine.arguments.firstIndex(of: "--toolbar-snapshot") { toolbarSnapshot(Array(CommandLine.arguments[i...])) }
     if let i = CommandLine.arguments.firstIndex(of: "--notes-lab") {
         let path = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : NSTemporaryDirectory() + "notes-lab.txt"

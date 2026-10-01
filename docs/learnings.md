@@ -338,12 +338,17 @@ sequenceDiagram
 
 ```text
 applyInline(bold, range of "**word**", inner = "word"):     # Sources/PriNotes/Formatter.swift
-    replace range with "word"                        # A: markers gone
-    select "word";           press Format ▸ Font ▸ Bold   # B: bold on
-    put cursor after "word"; press Format ▸ Font ▸ Bold   # B: with an empty selection this toggles
-                                                          #    the *typing* style, so what you
-                                                          #    type next isn't bold
+    replace range with "word" + U+200B               # A: markers gone; both take the plain
+                                                     #    style of the replaced Markdown
+    select "word"; press Format ▸ Font ▸ Bold        # B: bold on
+    put cursor after the U+200B                      # what you type next continues in its
+                                                     #    plain style
 ```
+
+An earlier version pressed Bold a second time with an empty selection, meant to switch the *typing*
+style off. Driven through Accessibility, Bold only switches on (§7.6), so typing carried on in bold.
+Lab phase 9 caught it with real keystrokes; AX inserts would have hidden it, because they take the
+preceding character's style whatever the typing style is.
 
 ### 7.3 Menu items are found by title
 
@@ -438,6 +443,9 @@ toggle(style, selection):                           # SelectionStyler.apply(.tog
 
 RTF has no way to say "no underline" (`\ulnone` reads back as nothing), which is why removal has
 to retype.
+
+From the real keyboard, Notes' ⌘B and ⌘I do switch both ways (lab phase 9), so only ⌘U is
+intercepted.
 
 ### 7.7 Clipboard etiquette (links and images)
 
@@ -682,4 +690,6 @@ renderer and expects every one to be blocked.
     no server and nothing to install on the phone. Try candidate links by hand before writing code.
 14. **Two AX reads are not one snapshot.** The text and the selection are read separately, so while
     Notes switches notes they can disagree. Check the range against the text before slicing it, or
-    AppKit raises an exception Swift can't catch.
+. **Test typing with real keystrokes.** AX inserts take the style of the preceding character, so
+    they can't show what the *typing style* is. Post real key events (`CGEvent` through the HID tap)
+    to see what a person typing would get.

@@ -5,8 +5,9 @@ import PriNotesCore
 ///
 /// Strategy per action:
 /// - block:        delete the "## " marker via AX, then press Format ▸ Heading (etc.).
-/// - inline:       replace "**x**" with "x" via AX, select "x", press Format ▸ Font ▸ Bold,
-///                 collapse the cursor to the end and press Bold again so new typing is plain.
+/// - inline:       replace "**x**" with "x" plus a zero-width space via AX, select "x", press
+///                 Format ▸ Font ▸ Bold, and put the cursor after the zero-width space, whose
+///                 plain style is what new typing continues in.
 /// - code / link:  paste an RTF snippet (monospaced text or a link, followed by a plain space)
 ///                 over the Markdown source, then restore the user's clipboard.
 /// - unicodeMath:  replace "$…$" with the text of `LatexUnicode.convertRich`, then apply
@@ -126,6 +127,11 @@ final class Formatter {
             insertTextMath(latex: latex, over: matchRange, ax: ax, el: el)
         case let .renderedMath(matchRange, latex):
             startRenderedMath(latex: latex, over: matchRange, text: ctx.text, ax: ax, el: el)
+        case let .symbol(matchRange, replacement):
+            // Replacing through AX keeps the style of the typed sequence; the cursor goes back after
+            // the space that triggered it.
+            guard ax.replace(in: el, range: matchRange, with: replacement) else { return fail("Couldn't edit the note text.") }
+            ax.setSelectedRange(of: el, NSRange(location: matchRange.location + (replacement as NSString).length + 1, length: 0))
         }
     }
 
@@ -171,7 +177,49 @@ final class Formatter {
             return
         }
 
-        // 2. An equation image: selected, or immediately before the cursor.
+        // 2. A converted equation (image or text): turn it back into its source.
+        isBusy = true
+        defer { isBusy = false }
+        guard let found = convertedEquation(in: ctx) else { return }
+        reopen(source: (found.display ? "$$" : "$") + found.source, over: found.range, text: text, ax: ax, el: el)
+    }
+
+    /// The two forms a converted equation takes in a note.
+    enum EquationForm { case text, image }
+
+    /// A converted equation found in the note: where it is, its LaTeX, and its form.
+    struct ConvertedEquation {
+        /// The range to replace when the equation is changed (for text, including its marker).
+        let range: NSRange
+        let source: String
+        /// True for an image (`$$…$$`), false for text (`$…$`).
+        let display: Bool
+    }
+
+    /// Cheap check for the selection toolbar: does the selection look like a converted equation?
+    ///
+    /// Text equations are matched against the history. An image can't be identified without
+    /// copying it, so any single selected attachment counts as a possible equation image; acting on
+    /// one that isn't reports "No LaTeX source found".
+    ///
+    /// Example: selecting "xb2" right after `$x_b^2$` was converted → `.text`; selecting a lone
+    /// image → `.image`; selecting "hello" → nil.
+    func selectedEquationForm(in ctx: Context) -> EquationForm? {
+        let sel = ctx.selection
+        guard sel.length > 0 else { return nil }
+        if sel.length == 1, ctx.text.character(at: sel.location) == Formatter.attachmentCharacter { return .image }
+        let selected = ctx.text.substring(with: sel).replacingOccurrences(of: Formatter.zeroWidthSpace, with: "")
+        return selected.isEmpty || store.source(forText: selected) == nil ? nil : .text
+    }
+
+    /// The converted equation that is selected, or immediately before the cursor, with its source.
+    /// Shared by ⌃⌘E, ⌃⌘⇧E and the toolbar's ∑ menu. Reports a failure (and returns nil) when there
+    /// is none. An image's source is recovered by copying it (`sourceOfImage`), which briefly uses
+    /// the clipboard and moves the cursor after the image.
+    private func convertedEquation(in ctx: Context) -> ConvertedEquation? {
+        let (ax, el, text, sel) = (ctx.ax, ctx.element, ctx.text, ctx.selection)
+
+        // An equation image: selected, or immediately before the cursor.
         var imageRange: NSRange?
         if sel.length == 1, text.character(at: sel.location) == Formatter.attachmentCharacter {
             imageRange = sel
@@ -179,16 +227,14 @@ final class Formatter {
             imageRange = NSRange(location: sel.location - 1, length: 1)
         }
         if let imageRange {
-            isBusy = true
-            defer { isBusy = false }
             guard let source = sourceOfImage(at: imageRange, ax: ax, el: el) else {
-                return fail("No LaTeX source found for this image (only equations made by Pri Notes can be edited).")
+                fail("No LaTeX source found for this image (only equations made by Pri Notes can be edited).")
+                return nil
             }
-            reopen(source: "$$" + source, over: imageRange, text: text, ax: ax, el: el)
-            return
+            return ConvertedEquation(range: imageRange, source: source, display: true)
         }
 
-        // 3. A Unicode/rich-text equation: selected, or just before the cursor.
+        // A text equation: selected, or just before the cursor.
         // Text equations end in an invisible zero-width space (see insertTextMath); include it in
         // the range being replaced but ignore it when matching. The cursor can sit on either side
         // of it, since it has no width.
@@ -222,11 +268,60 @@ final class Formatter {
             }
         }
         guard let entry else {
-            return fail("Put the cursor right after an equation (or select it), then press ⌃⌘E.")
+            fail("Put the cursor right after an equation (or select it), then press ⌃⌘E.")
+            return nil
         }
+        return ConvertedEquation(range: range, source: entry.source, display: false)
+    }
+
+    /// ⌃⌘⇧E and the toolbar's ∑ menu: switch the equation at the cursor (or selected) between text
+    /// (`$…$`) and image (`$$…$$`), keeping its LaTeX.
+    ///
+    /// Example: with the cursor after the text equation "xb2", ⌃⌘⇧E replaces it with the typeset
+    /// image of `x_b^2`; pressing it again with the image selected turns it back into text.
+    func switchEquationForm() {
+        guard isActive, !isBusy, let ctx = currentContext() else { return }
         isBusy = true
         defer { isBusy = false }
-        reopen(source: "$" + entry.source, over: range, text: text, ax: ax, el: el)
+        guard let found = convertedEquation(in: ctx) else { return }
+        // Re-read: recovering an image's source moves the cursor.
+        guard let now = currentContext() else { return }
+        if found.display {
+            insertTextMath(latex: found.source, over: found.range, ax: now.ax, el: now.element)
+        } else {
+            startRenderedMath(latex: found.source, over: found.range, text: now.text, ax: now.ax, el: now.element)
+        }
+    }
+
+    /// What the toolbar's ∑ menu can copy.
+    enum CopyFormat { case latex, mathML }
+
+    /// Copy the equation at the cursor (or selected) to the clipboard, as LaTeX with Markdown
+    /// delimiters (`$x_b^2$` for text, `$$…$$` for images: they paste into Overleaf, Markdown editors
+    /// and back into Notes) or as MathML from the bundled MathJax.
+    ///
+    /// Example: `copyEquation(.latex)` after "xb2" puts "$x_b^2$" on the clipboard as plain text.
+    func copyEquation(_ format: CopyFormat) {
+        guard isActive, !isBusy, let ctx = currentContext() else { return }
+        isBusy = true
+        guard let found = convertedEquation(in: ctx) else { isBusy = false; return }
+        isBusy = false
+        // Writing to the clipboard now also cancels `sourceOfImage`'s pending restore of the old
+        // contents, which only restores when nothing else has written since.
+        func put(_ string: String) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(string, forType: .string)
+        }
+        switch format {
+        case .latex:
+            let delimiter = found.display ? "$$" : "$"
+            put(delimiter + found.source + delimiter)
+        case .mathML:
+            Task {
+                do { put(try await self.renderer.mathML(found.source, display: found.display)) }
+                catch { self.fail("LaTeX: \(error.localizedDescription)") }
+            }
+        }
     }
 
     // MARK: - Markdown actions
@@ -239,14 +334,16 @@ final class Formatter {
     }
 
     private func applyInline(_ style: InlineStyle, matchRange: NSRange, inner: String, ax: NotesAX, el: AXUIElement) {
-        guard ax.replace(in: el, range: matchRange, with: inner) else { return fail("Couldn't edit the note text.") }
+        // The zero-width space keeps the style of the replaced Markdown (your plain text), so what
+        // you type after it is plain. Pressing Bold again with an empty selection doesn't do this:
+        // driven through AX it only switches on, and typing carried on in bold (lab phase 9).
+        guard ax.replace(in: el, range: matchRange, with: inner + Formatter.zeroWidthSpace) else {
+            return fail("Couldn't edit the note text.")
+        }
         let innerLength = (inner as NSString).length
         ax.setSelectedRange(of: el, NSRange(location: matchRange.location, length: innerLength))
         toggle(style, ax: ax)
-        // With an empty selection the same command toggles the *typing* style, so text typed
-        // next is not bold/italic/….
-        ax.setSelectedRange(of: el, NSRange(location: matchRange.location + innerLength, length: 0))
-        toggle(style, ax: ax)
+        ax.setSelectedRange(of: el, NSRange(location: matchRange.location + innerLength + 1, length: 0))
     }
 
     private func toggle(_ style: InlineStyle, ax: NotesAX) {

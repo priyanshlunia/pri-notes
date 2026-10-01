@@ -79,6 +79,10 @@ final class Formatter {
         if ax?.pid != app.processIdentifier { ax = NotesAX(pid: app.processIdentifier) }
         guard let ax, let el = ax.focusedTextArea(),
               let text = ax.value(of: el), let sel = ax.selectedRange(of: el) else { return nil }
+        // The value and the selection are two separate AX reads, so while Notes is switching notes
+        // or reflowing they can disagree (seen: selection {1008, 4} against a 873-unit value).
+        // Every caller slices `text` with `sel`, which raises an uncatchable ObjC exception.
+        guard NSMaxRange(sel) <= text.length else { return nil }
         return Context(ax: ax, element: el, text: text, selection: sel)
     }
 

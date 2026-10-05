@@ -18,6 +18,25 @@ final class ToolbarPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// The toolbar's root view. It hit-tests the toolbar's controls directly instead of walking down through
+/// the glass views. On macOS 26 the toolbar drew but ignored every click, while macOS 27 was fine.
+/// `NSGlassEffectView` re-parents and lays out its `contentView` itself, and if a control ends up
+/// outside an intermediate view's bounds, AppKit still draws it but the normal hit test never
+/// reaches it. Searching the controls by their own frames works however the glass arranges them.
+final class ToolbarGlassContainer: NSGlassEffectContainerView {
+    /// Every clickable control in the toolbar.
+    var controls: [NSControl] = []
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // `point` is in the superview's coordinates.
+        let local = superview.map { convert(point, from: $0) } ?? point
+        for control in controls where !control.isHiddenOrHasHiddenAncestor {
+            if control.bounds.contains(control.convert(local, from: self)) { return control }
+        }
+        return super.hitTest(point)
+    }
+}
+
 // MARK: - Toolbar
 
 /// Floating Liquid Glass toolbar shown above selected text in Notes:
@@ -58,7 +77,7 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     private var equationGlass: NSGlassEffectView!
     private var toggleButtons: [SelectionStyler.InlineStyleToggle: FirstClickButton] = [:]
     private var groups: [(glass: NSGlassEffectView, stack: NSStackView)] = []
-    private let container = NSGlassEffectContainerView()
+    private let container = ToolbarGlassContainer()
     private static let groupSpacing: CGFloat = 6
     private static let outerMargin: CGFloat = 6   // room for the glass shadow
 
@@ -84,6 +103,10 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false          // Liquid Glass draws its own shadow
+        // Take clicks over the whole panel. By default a clear, borderless window only takes clicks on
+        // its opaque pixels. Our controls are borderless, so the glass is their only background, and
+        // on macOS 26 the glass apparently doesn't count, which let clicks fall through to Notes.
+        panel.ignoresMouseEvents = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = buildContent()
@@ -168,6 +191,8 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
             glassGroup([equationPopUp]),
         ]
         equationGlass = glassViews.last
+        container.controls = [familyPopUp, facePopUp, minus, sizePopUp, plus, colorPopUp, fileLink, equationPopUp]
+            + toggles.compactMap { $0 as? NSControl }
         let row = NSView()
         glassViews.forEach(row.addSubview)
         container.spacing = Self.groupSpacing

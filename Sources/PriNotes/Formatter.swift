@@ -500,8 +500,7 @@ final class Formatter {
         let before = pb.changeCount
         if !ax.pressMenuItem("Copy") { ax.postKey(8, flags: .maskCommand) }   // ⌘C
         // The menu action is synchronous for Notes; give the pasteboard a moment regardless.
-        let deadline = Date().addingTimeInterval(0.5)
-        while pb.changeCount == before, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        pb.waitForChange(since: before, timeout: 0.5)
 
         // Notes fills in the (large) rich-text copy lazily, so the attachment may not be there on the
         // first read. Retry quietly for up to 1.5 s; the last attempt logs what it saw.
@@ -553,20 +552,22 @@ final class Formatter {
             }
         }
         for c in candidates {
-            if let source = MathRenderer.embeddedSource(in: c.data) {
+            if let source = imageSource(c.data, store: store) {
                 note("  source found in \(c.label)")
                 return source
-            }
-        }
-        for c in candidates {
-            if let hash = MathRenderer.pixelHash(of: c.data), let entry = store.source(forPixelHash: hash) {
-                note("  source found by pixel hash of \(c.label)")
-                return entry.source
             }
         }
         note("no equation source found among \(candidates.count) candidates: "
                   + candidates.map { "\($0.label) (\($0.data.count) B)" }.joined(separator: ", "))
         return nil
+    }
+
+    /// The LaTeX of an equation image: from its PNG metadata, else by its pixel hash in the history
+    /// (images from before the metadata was embedded). Nil for any other image.
+    static func imageSource(_ data: Data, store: EquationStore) -> String? {
+        if let source = MathRenderer.embeddedSource(in: data) { return source }
+        guard let hash = MathRenderer.pixelHash(of: data) else { return nil }
+        return store.source(forPixelHash: hash)?.source
     }
 
     // MARK: - Pasteboard helpers
@@ -681,7 +682,8 @@ final class Formatter {
         return best
     }
 
-    private func fail(_ message: String) {
+    /// Record an error for the menu, log it and beep. Also used by the note footer.
+    func fail(_ message: String) {
         lastError = message
         Log.write("error: \(message)")
         NSSound.beep()

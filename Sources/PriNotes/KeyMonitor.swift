@@ -3,8 +3,8 @@ import PriNotesCore
 
 /// Global keyboard/mouse tap for Apple Notes.
 ///
-/// While Notes is frontmost it reports three things, each delivered on the main thread
-/// *after* Notes has processed the event (so text read back via Accessibility is current):
+/// While Notes is frontmost it reports these, each delivered on the main thread *after* Notes has
+/// processed the event (so text read back via Accessibility is current):
 /// - `onTrigger`: a character that can complete a Markdown pattern was typed.
 /// - `onActivity`: any key or click — the cursor may have moved (drives the live preview).
 /// - `onHotkey`: ⌃⌘E was pressed (swallowed).
@@ -12,6 +12,8 @@ import PriNotesCore
 /// - `onFileLinkHotkey`: ⌃⌘K was pressed (swallowed).
 /// - `onEscape`: Esc was pressed (passed through to Notes).
 /// - `onUnderlineShortcut`: ⌘U was pressed; swallowed and handled by the app (see SelectionStyler).
+///
+/// It also reports `onNotesActivated` / `onNotesDeactivated` when Notes comes to or leaves the front.
 final class KeyMonitor {
     /// Tag placed on events we synthesize ourselves so the tap can ignore them.
     static let syntheticMarker: Int64 = 0x4E4D_4421   // "NMD!"
@@ -26,6 +28,8 @@ final class KeyMonitor {
     /// ⌃⌘⇧E: switch an equation between text and image (same key as ⌃⌘E, plus Shift).
     var onSwitchFormHotkey: (() -> Void)?
     var onFileLinkHotkey: (() -> Void)?
+    /// Called when Notes becomes the frontmost app.
+    var onNotesActivated: (() -> Void)?
     /// Called when Notes stops being the frontmost app.
     var onNotesDeactivated: (() -> Void)?
     /// Called when Esc is pressed in Notes (the key still reaches Notes).
@@ -47,6 +51,7 @@ final class KeyMonitor {
             let wasFrontmost = self.notesIsFrontmost
             self.notesIsFrontmost = app?.bundleIdentifier == NotesAX.bundleID
             if wasFrontmost && !self.notesIsFrontmost { self.onNotesDeactivated?() }
+            if !wasFrontmost && self.notesIsFrontmost { self.onNotesActivated?() }
         }
     }
 

@@ -1,8 +1,9 @@
 # Pri Notes (v1.1)
 
 A small menu-bar app that makes Apple Notes respond to Markdown as you type, adds LaTeX math, and
-puts a Liquid Glass formatting toolbar above selected text, and adds links to iCloud Drive files and
-folders that open on both your Mac and your iPhone. Fully offline. Modelled on the Markdown part of [NotesCmdr](https://smallest.app/notescmdr/).
+puts a Liquid Glass formatting toolbar above selected text, adds links to iCloud Drive files and
+folders that open on both your Mac and your iPhone, and shows backlinks and a Copy as Markdown button
+(equations as LaTeX) in the corner of each note. Fully offline. Modelled on the Markdown part of [NotesCmdr](https://smallest.app/notescmdr/).
 
 ## What it does
 
@@ -100,7 +101,7 @@ attachments are never touched. A change may take several ⌘Z presses to undo, o
 Dragging a file into Notes copies it into the note, cut off from the original. Pri Notes can link to
 the real file or folder instead:
 
-- Press **⌃⌘K** in a note, or click 🔗 in the selection toolbar, and choose a file or folder in
+- Press **⌃⌘K** in a note, or click the link-with-folder button in the selection toolbar, and choose a file or folder in
   iCloud Drive (app folders such as Obsidian's count too).
 - With text selected, the selection becomes the link. Otherwise the item's name is inserted.
 - **On iPhone,** tapping the link opens the item in the Files app. Nothing needs installing
@@ -115,6 +116,21 @@ outside iCloud Drive can't be linked, because the iPhone has no way to reach the
 For safety, a link to an app, script or other executable is only revealed in Finder, never run, and
 links that point outside your iCloud folders are refused. Notes can be shared, so a link you click
 may not be one you made.
+
+## Note footer: backlinks and Markdown export
+
+A small glass capsule sits in the bottom-right corner of the open note. Rest the pointer on a button
+to see what it does.
+
+- **↰ Backlinks** lists the notes that link to this one with Notes' `>>` links, with a count next
+  to the icon. Pick one to open it. Notes keeps these links only in its own database, so this
+  needs **Full Disk Access** (see Install); without it the menu explains how to turn it on.
+- **📋 Copy as Markdown** copies the whole note to the clipboard as Markdown, using Notes' own
+  Edit ▸ Copy as Markdown (macOS 26 or later), with every equation written back as LaTeX:
+  `$…$` inline, and equations that were images on their own line. Equations converted on another
+  Mac aren't in this Mac's equation history and stay as plain text.
+
+Turn the footer off from the menu-bar menu.
 
 ## Privacy and resource use
 
@@ -136,6 +152,10 @@ Pri Notes is fully offline and keeps everything on this Mac.
   links and equation images and to read an equation image's LaTeX, and it is restored afterwards.
   Copy LaTeX / Copy MathML replace it, as any Copy does. Fonts and colours go through the separate
   font pasteboard, which is also restored.
+- **Backlinks:** with Full Disk Access, Pri Notes opens Notes' database
+  (`~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite`) **read-only**, and only to
+  find which notes link to the open one. It never writes to it, and nothing leaves the Mac. Full Disk
+  Access is optional; everything else works without it.
 - **File links:** opening one is a local file operation. Pri Notes only accepts paths inside
   `~/Library/Mobile Documents` (your iCloud folders) and makes no network requests; iCloud itself does
   any downloading.
@@ -206,6 +226,13 @@ Access**. Its description lists everything such apps *could* do; Pri Notes only 
 while Notes is in front, and reads and edits Notes (see Privacy and resource use). The app starts working within a couple of seconds, with no
 relaunch needed.
 
+### 4. Optional: Full Disk Access, for backlinks
+
+The note footer's backlinks read Notes' own database, which macOS protects. To use them, turn on
+**Pri Notes** in **System Settings → Privacy & Security → Full Disk Access** (add it with **+** from
+`~/Applications` if it isn't listed). Like Accessibility, the grant survives rebuilds signed with the
+same certificate. Everything else works without it.
+
 The menu-bar icon (text lines with a "P" badge) has toggles for each feature, live preview, script
 style, display-style images, and "Launch at Login".
 
@@ -213,7 +240,7 @@ style, display-style images, and "Launch at Login".
 
 1. Quit Pri Notes from its menu.
 2. Delete `~/Applications/Pri Notes.app`.
-3. Remove it from the Accessibility list.
+3. Remove it from the Accessibility list. Remove it from Full Disk Access too, if you added it.
 4. Optionally, delete:
    - `~/Library/Application Support/PriNotes/`;
    - `~/Library/Logs/PriNotes.log`;

@@ -34,6 +34,8 @@ Debug modes of that build. None of them touch Notes:
 - `.build/debug/PriNotes --recover-from-clipboard`: after copying an equation image in Notes, runs the
   ⌃⌘E recovery code on the clipboard and prints the LaTeX it finds.
 - `.build/debug/PriNotes --toolbar-snapshot out.png [--dark]` draws the selection toolbar's controls.
+- `.build/debug/PriNotes --footer-snapshot out.png [count] [--dark]` draws the note footer with `count`
+  backlinks, next to the toolbar's file-link icon.
 
 ## In-Notes regression tests
 
@@ -51,6 +53,16 @@ open -n ~/Applications/Pri\ Notes.app --args --notes-lab /tmp/lab.txt --phase3
 - `--phase9`: doubly nested scripts, typing after `**bold**`, and ⌘B/⌘I from the keyboard.
 - `--phase10`: smart symbols, typing after `**bold**`, switching an equation text ↔ image, and
   Copy LaTeX/MathML. It uses the clipboard.
+- `--phase11`: discovery for the note footer: the Edit and File menus, a `>>` note link through AX
+  (put one in PRI-LAB first), Edit ▸ Copy as Markdown (with and without a selection), and the
+  editor's AX hierarchy. Uses the clipboard.
+- `--phase13`: the footer's Copy as Markdown end to end (text and image equations, a `**bold**`
+  marker). Uses the clipboard.
+
+One mode reads Notes' database instead (read-only; needs Full Disk Access for the app, and no PRI-LAB
+note): `open -n ~/Applications/Pri\ Notes.app --args --notes-db-probe /tmp/db.txt [--identifier <UUID>]`
+lists the link rows, the columns and the folder types; with `--identifier` also that note and its
+backlinks.
 
 Read the report in `/tmp/lab.txt` afterwards.
 
@@ -71,6 +83,7 @@ swiftc -O -o /tmp/make_icon scripts/make_icon.swift && /tmp/make_icon Resources/
   - `LatexUnicode.swift`: LaTeX to text, as `MathRun`s with script level and italic flag.
   - `StyleSample.swift`: the RTF style sample for Paste Style (keeps the system font) and font conversions.
   - `FileLinks.swift`: iCloud Drive path ↔ `shareddocuments://` link, with the safety checks.
+  - `MarkdownEquations.swift`: puts equation LaTeX back into Notes' Copy as Markdown output.
 - `Sources/PriNotes/`: the app.
   - `main.swift`: app delegate, menu, settings, debug modes.
   - `KeyMonitor.swift`: global key and click tap, active only while Notes is frontmost; ⌃⌘E, ⌃⌘K and ⌘U.
@@ -83,6 +96,11 @@ swiftc -O -o /tmp/make_icon scripts/make_icon.swift && /tmp/make_icon Resources/
   - `EquationStore.swift`: equation history used for re-editing.
   - `FileLinkInserter.swift`, `FileLinkOpener.swift`: ⌃⌘K and the toolbar's link button; opening
     clicked file links on the Mac.
+  - `NoteFooter.swift`: the glass capsule in the note's corner (backlinks menu, Copy as Markdown),
+    following the note editor.
+  - `NotesDatabase.swift`: read-only backlinks query on Notes' `NoteStore.sqlite`.
+  - `MarkdownExporter.swift`: Copy as Markdown with equations as LaTeX.
+  - `HoverHint.swift`: glass hover notes for our never-key panels (AppKit tooltips don't show there).
   - `MenuBarIcon.swift`: the menu-bar icon.
   - `Lab.swift`: the `--notes-lab` in-Notes experiment and regression harness.
   - `Log.swift`: the error log.

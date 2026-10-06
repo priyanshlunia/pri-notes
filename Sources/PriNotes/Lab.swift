@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import PriNotesCore
+import SQLite3
 
 /// Experiment and regression harness: `open -n "Pri Notes.app" --args --notes-lab <report.txt> [--phaseN]`.
 ///
@@ -20,6 +21,11 @@ import PriNotesCore
 ///   ⌘B / ⌘I from the keyboard switching off again.
 /// - `--phase10`: smart symbols, typing after `**bold**`, switching an equation text ↔ image, and
 ///   copying it as LaTeX / MathML (uses the clipboard).
+/// - `--phase11`: discovery for the note footer: the Edit/File menus, a `>>` note link through AX,
+///   Edit ▸ Copy as Markdown, the editor's AX hierarchy (uses the clipboard).
+/// - `--phase13`: the footer's Copy as Markdown end to end (uses the clipboard).
+/// - `--notes-db-probe <report> [--identifier <UUID>]` (not a phase; no note needed): note links in
+///   Notes' database, read-only (needs Full Disk Access).
 /// Findings are recorded in docs/NOTES.md.
 @MainActor
 enum NotesLab {
@@ -45,6 +51,50 @@ enum NotesLab {
         }
         guard initial.hasPrefix(marker) else {
             out("REFUSED: focused note does not start with \(marker); nothing was changed"); finish(3)
+        }
+
+        if CommandLine.arguments.contains("--phase13") {
+            // The note footer's Copy as Markdown, end to end: text equations (two on one line, one in
+            // italic context), an image equation on its own line and one mid-line, a **bold**
+            // conversion (its marker must not become an equation). Uses the clipboard.
+            let formatter = Formatter()
+            func text() -> NSString { ax.value(of: el) ?? "" }
+            func append(_ s: String) {
+                let end = text().length
+                ax.replace(in: el, range: NSRange(location: end, length: 0), with: s)
+                ax.setSelectedRange(of: el, NSRange(location: end + (s as NSString).length, length: 0))
+                pause(0.15)
+            }
+            let markerEnd = (marker as NSString).length
+            ax.replace(in: el, range: NSRange(location: markerEnd, length: text().length - markerEnd), with: "\n")
+            ax.setSelectedRange(of: el, NSRange(location: markerEnd + 1, length: 0))
+            ax.pressMenuItem("Body"); pause(0.3)
+            append("Some **bold**"); formatter.check(); pause(0.6)
+            append(" words.\nInline $x_b^2$"); formatter.check(); pause(0.8)
+            append(" and $\\alpha + \\beta$"); formatter.check(); pause(0.8)
+            append(" done.\n$$\\int_0^1 f\\,dx$$"); formatter.check(); pause(3.0)
+            append("\nMid $$E=mc^2$$"); formatter.check(); pause(3.0)
+            append(" line.\nLast $e^{i\\pi}$"); formatter.check(); pause(0.8)
+            append(" end")
+            pause(0.5)
+            out("text: \(text().debugDescription)")
+            out("last error: \(formatter.lastError ?? "none")")
+            let selection = NSRange(location: 3, length: 2)
+            ax.setSelectedRange(of: el, selection)
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            let started = Date()
+            let ok = MarkdownExporter(formatter: formatter).copyNote(textArea: el, ax: ax)
+            out("copyNote: \(ok) in \(String(format: "%.2f", Date().timeIntervalSince(started))) s, last error: \(formatter.lastError ?? "none")")
+            out("clipboard types: \(pb.types?.map(\.rawValue) ?? [])")
+            out("markdown: \((pb.string(forType: .string) ?? "nil").debugDescription)")
+            out("selection restored: \(ax.selectedRange(of: el).map { $0 == selection } ?? false)")
+            out("text unchanged: \(text().length)")
+            finish(0)
+        }
+        if CommandLine.arguments.contains("--phase11") {
+            phase11(ax: ax, el: el, out: out)
+            finish(0)
         }
 
         // Fresh test line after the marker line.
@@ -472,7 +522,7 @@ enum NotesLab {
         finish(0)
     }
 
-    /// Second round: keep the system font through Paste Style (hand-written RTF naming
+    /// The AX attributed string of `range` in the note.
     private static func attributed(_ ax: NotesAX, _ el: AXUIElement, _ range: NSRange) -> NSAttributedString? {
         var cf = CFRange(location: range.location, length: range.length)
         guard let v = AXValueCreate(.cfRange, &cf) else { return nil }
@@ -480,6 +530,217 @@ enum NotesLab {
         guard AXUIElementCopyParameterizedAttributeValue(
             el, kAXAttributedStringForRangeParameterizedAttribute as CFString, v, &result) == .success else { return nil }
         return result as? NSAttributedString
+    }
+
+    /// Phase 11 (discovery for the note footer): how a note link looks through AX, what Edit ▸ Copy
+    /// as Markdown produces (equations, images, escaping, with and without a selection), the menus
+    /// involved, and the AX geometry around the note editor. Uses the clipboard.
+    private static func phase11(ax: NotesAX, el: AXUIElement, out: (String) -> Void) {
+        let pb = NSPasteboard.general
+        func text() -> NSString { ax.value(of: el) ?? "" }
+        func attr<T>(_ e: AXUIElement, _ name: String) -> T? {
+            var v: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success, let v else { return nil }
+            if T.self == AXUIElement.self { return CFGetTypeID(v) == AXUIElementGetTypeID() ? (v as! T) : nil }
+            if T.self == AXValue.self { return CFGetTypeID(v) == AXValueGetTypeID() ? (v as! T) : nil }
+            return v as? T
+        }
+        func frame(_ e: AXUIElement) -> String {
+            var p = CGPoint.zero, s = CGSize.zero
+            if let v: AXValue = attr(e, kAXPositionAttribute) { AXValueGetValue(v, .cgPoint, &p) }
+            if let v: AXValue = attr(e, kAXSizeAttribute) { AXValueGetValue(v, .cgSize, &s) }
+            return "(\(Int(p.x)),\(Int(p.y)) \(Int(s.width))×\(Int(s.height)))"
+        }
+        func describeElement(_ e: AXUIElement) -> String {
+            let role: String = attr(e, kAXRoleAttribute) ?? "?"
+            let sub: String = attr(e, kAXSubroleAttribute) ?? ""
+            let ident: String = attr(e, "AXIdentifier") ?? ""
+            let title: String = attr(e, kAXTitleAttribute) ?? ""
+            let desc: String = attr(e, kAXDescriptionAttribute) ?? ""
+            return "\(role) \(sub) id=\(ident) title=\(title.prefix(30).debugDescription) desc=\(desc.prefix(30).debugDescription) \(frame(e))"
+        }
+        func waitForPasteboard(after before: Int) {
+            pb.waitForChange(since: before, timeout: 1.0)
+            pause(0.3)
+        }
+        func dumpPasteboard(_ label: String) {
+            out("  [\(label)] types: \(pb.types?.map(\.rawValue) ?? [])")
+            if let s = pb.string(forType: .string) { out("  [\(label)] string: \(s.debugDescription)") }
+            for type in pb.types ?? [] where type.rawValue.lowercased().contains("markdown") {
+                out("  [\(label)] \(type.rawValue): \((pb.string(forType: type) ?? "(data)").debugDescription)")
+            }
+        }
+        func copyAsMarkdown(selection: NSRange, label: String) {
+            ax.setSelectedRange(of: el, selection); pause(0.2)
+            pb.clearContents()
+            let before = pb.changeCount
+            let pressed = ax.pressMenuItem("Copy as Markdown")
+            waitForPasteboard(after: before)
+            out("== Copy as Markdown, \(label): pressed=\(pressed)")
+            dumpPasteboard(label)
+        }
+
+        out("== A. menus (Edit, File, Export To)")
+        if let bar: AXUIElement = attr(AXUIElementCreateApplication(ax.pid), kAXMenuBarAttribute),
+           let tops: [AXUIElement] = attr(bar, kAXChildrenAttribute) {
+            for top in tops {
+                let title: String = attr(top, kAXTitleAttribute) ?? ""
+                guard ["Edit", "File"].contains(title),
+                      let menu = (attr(top, kAXChildrenAttribute) as [AXUIElement]?)?.first,
+                      let items: [AXUIElement] = attr(menu, kAXChildrenAttribute) else { continue }
+                out("  \(title): " + items.compactMap { item -> String? in
+                    let t: String = attr(item, kAXTitleAttribute) ?? ""
+                    guard !t.isEmpty else { return nil }
+                    let enabled: Bool = attr(item, kAXEnabledAttribute) ?? false
+                    var sub = ""
+                    if let m = (attr(item, kAXChildrenAttribute) as [AXUIElement]?)?.first,
+                       let subItems: [AXUIElement] = attr(m, kAXChildrenAttribute) {
+                        sub = " [" + subItems.compactMap { attr($0, kAXTitleAttribute) as String? }.joined(separator: ", ") + "]"
+                    }
+                    return t + (enabled ? "" : " (off)") + sub
+                }.joined(separator: " | "))
+            }
+        }
+
+        out("== B. the note as found (put a >> note link in it first)")
+        let original = text()
+        out("  text: \(original.debugDescription)")
+        for i in 0..<original.length where original.character(at: i) == 0xFFFC {
+            let r = NSRange(location: i, length: 1)
+            out("  U+FFFC at \(i): " + (attributed(ax, el, r).map { a in
+                a.attributes(at: 0, effectiveRange: nil).map { "\($0.key.rawValue)=\(String(describing: $0.value).replacingOccurrences(of: "\n", with: " "))" }
+                    .sorted().joined(separator: "; ")
+            } ?? "(no attributed string)"))
+        }
+        copyAsMarkdown(selection: NSRange(location: 0, length: original.length), label: "original, all selected")
+        copyAsMarkdown(selection: NSRange(location: original.length, length: 0), label: "original, cursor only")
+
+        out("== C. geometry: the text area and its ancestors")
+        var e: AXUIElement? = el
+        var depth = 0
+        while let current = e, depth < 12 {
+            out("  \(depth): " + describeElement(current))
+            e = attr(current, kAXParentAttribute)
+            depth += 1
+        }
+        if let window: AXUIElement = attr(el, kAXWindowAttribute), let kids: [AXUIElement] = attr(window, kAXChildrenAttribute) {
+            out("  window children:")
+            for k in kids { out("    " + describeElement(k)) }
+        }
+        if let scroll: AXUIElement = attr(el, kAXParentAttribute), let kids: [AXUIElement] = attr(scroll, kAXChildrenAttribute) {
+            out("  text area's parent children:")
+            for k in kids { out("    " + describeElement(k)) }
+        }
+        out("  visible character range: \(String(describing: attr(el, kAXVisibleCharacterRangeAttribute) as AXValue?))")
+
+        out("== D. test content: text equations, an image equation, styles, characters Markdown escapes")
+        let formatter = Formatter()
+        func append(_ s: String) {
+            let end = text().length
+            ax.replace(in: el, range: NSRange(location: end, length: 0), with: s)
+            ax.setSelectedRange(of: el, NSRange(location: end + (s as NSString).length, length: 0))
+            pause(0.15)
+        }
+        let markerEnd = (marker as NSString).length
+        ax.replace(in: el, range: NSRange(location: markerEnd, length: text().length - markerEnd), with: "")
+        append("\nSome **bold**"); formatter.check(); pause(0.6)
+        append(" words.\nInline $x_b^2$"); formatter.check(); pause(0.8)
+        append(" and $\\alpha + \\beta$"); formatter.check(); pause(0.8)
+        append(" done.\nDisplay:\n$$\\int_0^1 f\\,dx$$"); formatter.check(); pause(3.0)
+        append("\nStars * and _under_ and [brackets] and a\\b and <tag> and 2^3 # hash")
+        append("\nLast line")
+        pause(0.5)
+        let content = text()
+        out("  text: \(content.debugDescription)")
+        out("  last error: \(formatter.lastError ?? "none")")
+        copyAsMarkdown(selection: NSRange(location: 0, length: content.length), label: "test content, all selected")
+        let inline = content.range(of: "Inline")
+        copyAsMarkdown(selection: NSRange(location: inline.location, length: 6), label: "test content, one word selected")
+
+        out("== E. Edit ▸ Copy of everything: attachments in the rich text, in order")
+        ax.setSelectedRange(of: el, NSRange(location: 0, length: content.length)); pause(0.2)
+        pb.clearContents()
+        let before = pb.changeCount
+        ax.pressMenuItem("Copy")
+        waitForPasteboard(after: before)
+        pause(1.2)   // Notes fills the rich text lazily
+        out("  types: \(pb.types?.map(\.rawValue) ?? [])")
+        for type in pb.types ?? [] where type == .rtfd || type.rawValue == "com.apple.flat-rtfd" {
+            guard let data = pb.data(forType: type), let a = NSAttributedString(rtfd: data, documentAttributes: nil) else {
+                out("  \(type.rawValue): not parseable"); continue
+            }
+            out("  \(type.rawValue): \(a.length) chars, string \(a.string.debugDescription)")
+            a.enumerateAttribute(.attachment, in: NSRange(location: 0, length: a.length)) { value, r, _ in
+                guard let att = value as? NSTextAttachment else { return }
+                let data = att.fileWrapper?.regularFileContents ?? att.contents
+                out("    attachment at \(r.location): file \(att.fileWrapper?.preferredFilename ?? "?"), \(data?.count ?? 0) B, source \(data.flatMap(MathRenderer.embeddedSource(in:)) ?? "none")")
+            }
+        }
+        ax.setSelectedRange(of: el, NSRange(location: content.length, length: 0))
+    }
+
+    /// `--notes-db-probe <report>`: what Notes' database holds about note links, read-only. Needs Full
+    /// Disk Access for Pri Notes.
+    static func probeDatabase(reportPath: String) -> Never {
+        var report: [String] = []
+        func out(_ s: String) { report.append(s); print(s) }
+        func finish(_ code: Int32) -> Never {
+            try? report.joined(separator: "\n").write(toFile: reportPath, atomically: true, encoding: .utf8)
+            exit(code)
+        }
+
+        let path = NotesDatabase.path
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            out("open failed: \(String(cString: sqlite3_errmsg(db)))"); finish(2)
+        }
+        func rows(_ sql: String, bind: String? = nil) -> [[String: String]] {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                out("  SQL error: \(String(cString: sqlite3_errmsg(db))) in \(sql)"); return []
+            }
+            defer { sqlite3_finalize(stmt) }
+            if let bind { sqlite3_bind_text(stmt, 1, bind, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
+            var result: [[String: String]] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                var row: [String: String] = [:]
+                for i in 0..<sqlite3_column_count(stmt) {
+                    let name = String(cString: sqlite3_column_name(stmt, i))
+                    switch sqlite3_column_type(stmt, i) {
+                    case SQLITE_NULL: continue
+                    case SQLITE_BLOB: row[name] = "<blob \(sqlite3_column_bytes(stmt, i)) B>"
+                    default: row[name] = String(String(cString: sqlite3_column_text(stmt, i)).prefix(160))
+                    }
+                }
+                result.append(row)
+            }
+            return result
+        }
+        func show(_ row: [String: String]) -> String { row.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ") }
+
+        out("entities: " + rows("SELECT Z_ENT, Z_NAME FROM Z_PRIMARYKEY").map { "\($0["Z_ENT"] ?? "")=\($0["Z_NAME"] ?? "")" }.joined(separator: ", "))
+        let columns = rows("PRAGMA table_info(ZICCLOUDSYNCINGOBJECT)")
+        out("ZICCLOUDSYNCINGOBJECT columns (\(columns.count)): " + columns.map { "\($0["name"] ?? "")(\($0["type"] ?? ""))" }.joined(separator: " "))
+        let textColumns = columns.filter { ($0["type"] ?? "").uppercased().contains("VARCHAR") || ($0["type"] ?? "").uppercased() == "TEXT" }.compactMap { $0["name"] }
+        out("text columns: \(textColumns.joined(separator: " "))")
+        for column in textColumns {
+            let hits = rows("SELECT * FROM ZICCLOUDSYNCINGOBJECT WHERE \(column) LIKE 'applenotes:%' LIMIT 20")
+            guard !hits.isEmpty else { continue }
+            out("== rows with \(column) LIKE 'applenotes:%': \(hits.count)")
+            for hit in hits { out("  " + show(hit)) }
+        }
+        out("== folder types in use")
+        for row in rows("SELECT ZFOLDERTYPE, COUNT(*) AS n FROM ZICCLOUDSYNCINGOBJECT WHERE ZTITLE2 IS NOT NULL GROUP BY ZFOLDERTYPE") { out("  " + show(row)) }
+        if let i = CommandLine.arguments.firstIndex(of: "--identifier"), i + 1 < CommandLine.arguments.count {
+            let id = CommandLine.arguments[i + 1]
+            out("== rows with ZIDENTIFIER \(id), and the notes linking to it (NotesDatabase.backlinks)")
+            for row in rows("SELECT Z_PK, Z_ENT, ZTITLE1, ZFOLDER, ZMARKEDFORDELETION FROM ZICCLOUDSYNCINGOBJECT WHERE ZIDENTIFIER = ?1", bind: id) { out("  " + show(row)) }
+            out("  backlinks: \(NotesDatabase.backlinks(to: id))")
+        }
+        out("== other tables")
+        out("  " + rows("SELECT name FROM sqlite_master WHERE type='table'").compactMap { $0["name"] }.joined(separator: " "))
+        sqlite3_close(db)
+        finish(0)
     }
 
     private static func pause(_ seconds: Double) {

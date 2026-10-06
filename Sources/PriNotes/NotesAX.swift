@@ -19,6 +19,16 @@ final class NotesAX {
         AXUIElementSetMessagingTimeout(app, 0.5)
     }
 
+    /// Notes as a running app, if it is running.
+    static var runningApp: NSRunningApplication? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
+    }
+
+    /// True while Notes is the frontmost app (its menu items are disabled otherwise).
+    static var isFrontmost: Bool {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID
+    }
+
     // MARK: - Reading the note
 
     /// The focused note body, or nil if focus is elsewhere (search field, sidebar, …).
@@ -26,6 +36,61 @@ final class NotesAX {
         guard let el: AXUIElement = attribute(app, kAXFocusedUIElementAttribute) else { return nil }
         let role: String? = attribute(el, kAXRoleAttribute)
         return role == (kAXTextAreaRole as String) ? el : nil
+    }
+
+    /// The note editor in Notes' focused window, whether or not it has keyboard focus: the scroll
+    /// area Notes identifies as "Note Body Scroll View" and the note's text area inside it.
+    /// Returns nil when the window shows no note (gallery view, an empty folder, Settings…).
+    ///
+    /// Seen in lab phase 11 (macOS 27): AXWindow ▸ AXSplitGroup ▸ AXScrollArea "Note Body Scroll
+    /// View" ▸ AXTextArea "Note[id=<UUID>]" next to an AXScrollBar. The search is breadth-first and
+    /// bounded, so a changed hierarchy costs a little time rather than failing.
+    func noteEditor() -> (scrollArea: AXUIElement, textArea: AXUIElement, window: AXUIElement)? {
+        guard let window: AXUIElement = attribute(app, kAXFocusedWindowAttribute) else { return nil }
+        var queue: [(AXUIElement, Int)] = [(window, 0)]
+        var visited = 0
+        while !queue.isEmpty, visited < 400 {
+            let (element, depth) = queue.removeFirst()
+            visited += 1
+            let identifier: String? = attribute(element, "AXIdentifier")
+            if identifier == "Note Body Scroll View",
+               let children: [AXUIElement] = attribute(element, kAXChildrenAttribute),
+               let text = children.first(where: { (attribute($0, kAXRoleAttribute) as String?) == (kAXTextAreaRole as String) }) {
+                return (element, text, window)
+            }
+            guard depth < 8, let children: [AXUIElement] = attribute(element, kAXChildrenAttribute) else { continue }
+            queue.append(contentsOf: children.map { ($0, depth + 1) })
+        }
+        return nil
+    }
+
+    /// The window currently focused in Notes.
+    func focusedWindow() -> AXUIElement? {
+        attribute(app, kAXFocusedWindowAttribute)
+    }
+
+    /// Screen frame of an element, top-left origin (as AX reports it), or nil once it's gone.
+    func frame(of el: AXUIElement) -> CGRect? {
+        guard let p: AXValue = attribute(el, kAXPositionAttribute), let s: AXValue = attribute(el, kAXSizeAttribute) else { return nil }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(p, .cgPoint, &origin), AXValueGetValue(s, .cgSize, &size) else { return nil }
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// The UUID of the note shown in a note text area, from its AX identifier `Note[id=<UUID>]`.
+    /// It is the note's `ZIDENTIFIER` in Notes' database and the id in `applenotes://` links
+    /// (verified with `--notes-db-probe --identifier`).
+    func noteIdentifier(of textArea: AXUIElement) -> String? {
+        guard let raw: String = attribute(textArea, "AXIdentifier"), raw.hasPrefix("Note[id="), raw.hasSuffix("]") else { return nil }
+        let id = String(raw.dropFirst("Note[id=".count).dropLast())
+        return id.isEmpty ? nil : id
+    }
+
+    /// Give an element keyboard focus (e.g. the note text after a click in the note list).
+    @discardableResult
+    func focus(_ el: AXUIElement) -> Bool {
+        AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
     }
 
     func value(of el: AXUIElement) -> NSString? {
@@ -171,5 +236,24 @@ final class NotesAX {
             return CFGetTypeID(value) == AXValueGetTypeID() ? (value as! T) : nil
         }
         return value as? T
+    }
+}
+
+extension NSPasteboard {
+    /// Wait, running the run loop, until something writes to the pasteboard after `count` (a
+    /// `changeCount` read before pressing a Copy menu item), or `timeout` seconds pass. Returns
+    /// whether it changed. Notes' Copy is synchronous, but Copy Style and Copy as Markdown can lag.
+    ///
+    /// Example:
+    /// ```swift
+    /// let before = pb.changeCount
+    /// ax.pressMenuItem("Copy as Markdown")
+    /// guard pb.waitForChange(since: before, timeout: 1.5) else { return }
+    /// ```
+    @discardableResult
+    func waitForChange(since count: Int, timeout: Double) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while changeCount == count, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        return changeCount != count
     }
 }

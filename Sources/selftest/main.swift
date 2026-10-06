@@ -195,5 +195,45 @@ do {
           .flatMap { FileLinks.macPath(for: $0, home: home) } == drive + "/#1 notes?.txt", "# and ? round trip")
 }
 
+// MARK: - Markdown export: equations back to LaTeX
+do {
+    typealias T = MarkdownEquations.TextEquation
+    typealias I = MarkdownEquations.ImageAttachment
+    let z = "\u{200B}"
+    func restore(_ md: String, _ eqs: [T?], _ images: [I] = []) -> String {
+        MarkdownEquations.restore(in: md, textEquations: eqs, images: images)
+    }
+    let xb2 = T(text: "xb2", source: "x_b^2")
+    let ab = T(text: "α + β", source: "\\alpha + \\beta")
+    // Lab phase 11 output, verbatim (inside a heading, where Notes writes the italic runs as bold).
+    check(restore("# Inline **xb**2\(z) and **α** + **β**\(z) done.  \n", [xb2, ab])
+          == "# Inline $x_b^2$ and $\\alpha + \\beta$ done.  \n", "export: lab output, two text equations")
+    check(restore("Some bold\(z) words.  \nInline *xb*2\(z) end", [nil, xb2])
+          == "Some bold words.  \nInline $x_b^2$ end", "export: bold marker skipped and removed")
+    check(restore("so *x*2\(z) and 2*x*\(z).", [T(text: "x2", source: "x^2"), T(text: "2x", source: "2x")])
+          == "so $x^2$ and $2x$.", "export: opening delimiter before vs inside")
+    check(restore("**word** *y*\(z)", [T(text: "y", source: "y")]) == "**word** $y$", "export: neighbouring bold untouched")
+    check(restore("plain xb2\(z) text", [xb2]) == "plain $x_b^2$ text", "export: no emphasis at all")
+    check(restore("a <u>xb2</u>\(z)", [xb2]) == "a <u>xb2</u>", "export: unmatched equation left as text")
+    check(restore("one\(z) two", [xb2, ab]) == "one two", "export: marker count mismatch leaves text")
+    // Images.
+    let integral = I(filename: "Pasted Graphic.png", source: "\\int_0^1 f\\,dx")
+    check(restore("Display:  \n![Pasted Graphic.png](Pasted%20Graphic.png)  \n\nNext  \n", [], [integral])
+          == "Display:  \n$\\int_0^1 f\\,dx$  \n\nNext  \n", "export: image equation on its own line")
+    check(restore("# ![Pasted Graphic.png](Pasted%20Graphic.png)  \n", [], [integral])
+          == "# $\\int_0^1 f\\,dx$  \n", "export: block prefix counts as its own line")
+    check(restore("so ![Pasted Graphic.png](Pasted%20Graphic.png) and more  \n", [], [integral])
+          == "so  \n$\\int_0^1 f\\,dx$  \nand more  \n", "export: mid-line image gets its own line")
+    let photo = I(filename: "IMG_1.jpeg", source: nil)
+    let second = I(filename: "Pasted Graphic 1.png", source: "y")
+    check(restore("![IMG_1.jpeg](IMG_1.jpeg)  \n![Pasted Graphic 1.png](Pasted%20Graphic%201.png)  \n", [], [photo, second])
+          == "![IMG_1.jpeg](IMG_1.jpeg)  \n$y$  \n", "export: photos kept, equations matched by name")
+    check(restore("[file.pdf](file.pdf) ![Pasted Graphic.png](Pasted%20Graphic.png)", [],
+                  [I(filename: "file.pdf", source: nil), integral])
+          == "[file.pdf](file.pdf)  \n$\\int_0^1 f\\,dx$", "export: non-image attachment skipped")
+    check(restore("x ![a.png](a.png)", [], [I(filename: "b.png", source: "z")]) == "x ![a.png](a.png)",
+          "export: unknown image untouched")
+}
+
 print("\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

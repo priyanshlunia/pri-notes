@@ -13,7 +13,28 @@ final class FirstClickPopUp: NSPopUpButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+/// The shared shell of the selection toolbar, the note footer and hover hints: a borderless, clear,
+/// floating panel on every Space that never becomes key, so keyboard focus and the selection stay in
+/// Notes. Liquid Glass draws its own shadow, so the window has none.
 final class ToolbarPanel: NSPanel {
+    /// `interactive`: take clicks over the whole panel. By default a clear, borderless window only
+    /// takes clicks on its opaque pixels; our controls are borderless, so the glass is their only
+    /// background, and on macOS 26 the glass apparently doesn't count, which let clicks fall through
+    /// to Notes. Non-interactive panels (hover hints) let every click through.
+    convenience init(interactive: Bool) {
+        self.init(contentRect: NSRect(x: 0, y: 0, width: 100, height: 40),
+                  styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
+        level = .floating
+        isFloatingPanel = true
+        hidesOnDeactivate = false
+        backgroundColor = .clear
+        isOpaque = false
+        hasShadow = false
+        ignoresMouseEvents = !interactive
+        becomesKeyOnlyIfNeeded = true
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    }
+
     override var canBecomeKey: Bool { false }    // keep keyboard focus (and the selection) in Notes
     override var canBecomeMain: Bool { false }
 }
@@ -40,7 +61,7 @@ final class ToolbarGlassContainer: NSGlassEffectContainerView {
 // MARK: - Toolbar
 
 /// Floating Liquid Glass toolbar shown above selected text in Notes:
-/// `[ Font ▾ | Typeface ▾ ]  [ B I U S ]  [ − 13 + ]  [ ● ▾ ]  [ 🔗 ]  [ ∑ ▾ ]`
+/// `[ Font ▾ | Typeface ▾ ]  [ B I U S ]  [ − 13 + ]  [ ● ▾ ]  [ 📁🔗 ]  [ ∑ ▾ ]`
 ///
 /// The ∑ capsule appears only when the selection is a converted equation: it switches the equation
 /// between text and image and copies it as LaTeX or MathML. A selected image shows the ∑ capsule
@@ -78,6 +99,8 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     private var toggleButtons: [SelectionStyler.InlineStyleToggle: FirstClickButton] = [:]
     private var groups: [(glass: NSGlassEffectView, stack: NSStackView)] = []
     private let container = ToolbarGlassContainer()
+    /// Hover notes for the controls: AppKit tooltips never show for a background app (see HoverHint).
+    private let hints = HoverHint()
     private static let groupSpacing: CGFloat = 6
     private static let outerMargin: CGFloat = 6   // room for the glass shadow
 
@@ -94,21 +117,8 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     init(formatter: Formatter) {
         self.formatter = formatter
         self.styler = SelectionStyler(formatter: formatter)
-        panel = ToolbarPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 44),
-                             styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
+        panel = ToolbarPanel(interactive: true)
         super.init()
-        panel.level = .floating
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = false          // Liquid Glass draws its own shadow
-        // Take clicks over the whole panel. By default a clear, borderless window only takes clicks on
-        // its opaque pixels. Our controls are borderless, so the glass is their only background, and
-        // on macOS 26 the glass apparently doesn't count, which let clicks fall through to Notes.
-        panel.ignoresMouseEvents = false
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = buildContent()
         NotificationCenter.default.addObserver(self, selector: #selector(colorPanelClosed),
                                                name: NSWindow.willCloseNotification, object: NSColorPanel.shared)
@@ -168,12 +178,10 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         minus.toolTip = "Smaller"
         plus.toolTip = "Bigger"
 
-        let fileLink = FirstClickButton(image: NSImage(systemSymbolName: "link.badge.plus", accessibilityDescription: "Link to file")
-                                            ?? NSImage(systemSymbolName: "link", accessibilityDescription: "Link to file")!,
-                                        target: self, action: #selector(insertFileLink))
+        let fileLink = FirstClickButton(image: Self.folderLinkImage(), target: self, action: #selector(insertFileLink))
         fileLink.isBordered = false
         fileLink.contentTintColor = .labelColor
-        fileLink.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        fileLink.widthAnchor.constraint(equalToConstant: 28).isActive = true
         fileLink.toolTip = "Link to a file or folder in iCloud Drive (⌃⌘K)"
 
         equationPopUp.isBordered = false
@@ -193,6 +201,13 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         equationGlass = glassViews.last
         container.controls = [familyPopUp, facePopUp, minus, sizePopUp, plus, colorPopUp, fileLink, equationPopUp]
             + toggles.compactMap { $0 as? NSControl }
+        // The hints read each control's toolTip once; clearing it avoids a second, native tooltip
+        // in the rare moments Pri Notes is active (e.g. with the colour panel open).
+        for control in container.controls {
+            guard let tip = control.toolTip else { continue }
+            control.toolTip = nil
+            hints.attach(to: control) { tip }
+        }
         let row = NSView()
         glassViews.forEach(row.addSubview)
         container.spacing = Self.groupSpacing
@@ -252,6 +267,7 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
     }
 
     func hide() {
+        hints.hide()
         pending?.cancel()
         selection = nil
         panel.orderOut(nil)
@@ -426,6 +442,39 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         return menu
     }
 
+    /// The file-link button's icon: a chain link with a small folder in its empty top-left corner,
+    /// so it reads as "link to an iCloud folder or file" and doesn't look like Notes' own Add Link.
+    ///
+    /// SF Symbols has no such glyph, so it is composed from `link` and `folder.fill` (both in every
+    /// SF Symbols release, so fine on macOS 26). A halo around the folder is knocked out of the link
+    /// so the two stay apart at small sizes. The result is a template image, tinted like the other
+    /// toolbar icons.
+    ///
+    /// Example: `FirstClickButton(image: SelectionToolbar.folderLinkImage(), target: …, action: …)`.
+    static func folderLinkImage(pointSize: CGFloat = 14) -> NSImage {
+        let fallback = NSImage(systemSymbolName: "link", accessibilityDescription: "Link to file")!
+        guard let link = fallback.withSymbolConfiguration(.init(pointSize: pointSize, weight: .regular)),
+              let folder = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: pointSize * 0.58, weight: .bold))
+        else { return fallback }
+        let size = NSSize(width: link.size.width + folder.size.width * 0.3, height: link.size.height + folder.size.height * 0.25)
+        let image = NSImage(size: size, flipped: false) { _ in
+            link.draw(in: NSRect(x: size.width - link.size.width, y: 0, width: link.size.width, height: link.size.height))
+            let badge = NSRect(x: 0, y: size.height - folder.size.height, width: folder.size.width, height: folder.size.height)
+            let halo: CGFloat = 1.4
+            for dx in stride(from: -halo, through: halo, by: halo / 2) {
+                for dy in stride(from: -halo, through: halo, by: halo / 2) {
+                    folder.draw(in: badge.offsetBy(dx: dx, dy: dy), from: .zero, operation: .destinationOut, fraction: 1)
+                }
+            }
+            folder.draw(in: badge, from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Link to an iCloud Drive file or folder"
+        return image
+    }
+
     /// Round colour swatch; nil = automatic (half light, half dark), `mixed` = hollow ring.
     static func swatch(_ color: NSColor?, mixed: Bool = false) -> NSImage {
         NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
@@ -447,7 +496,10 @@ final class SelectionToolbar: NSObject, NSMenuDelegate {
         }
     }
 
-    func menuWillOpen(_ menu: NSMenu) { menuOpen = true }
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+        hints.hide()
+    }
     func menuDidClose(_ menu: NSMenu) { menuOpen = false }
 
     // MARK: Actions

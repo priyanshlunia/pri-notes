@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var preview = LivePreview(formatter: formatter)
     private lazy var toolbar = SelectionToolbar(formatter: formatter)
     private lazy var fileLinks = FileLinkInserter(formatter: formatter)
+    private lazy var footer = NoteFooter(formatter: formatter)
     private var statusItem: NSStatusItem!
     private var permissionTimer: Timer?
     private let defaults = UserDefaults.standard
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// (menu title, defaults key) for the math options.
     private let optionToggles: [(String, String)] = [
         ("Selection toolbar (font, style, size, colour)", "selectionToolbar"),
+        ("Note footer (backlinks, Copy as Markdown)", "noteFooter"),
         ("Live equation preview", "livePreview"),
         ("Real superscripts/subscripts in $…$", "richScripts"),
         ("Equation images in display style", "displayStyle"),
@@ -34,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         defaults.register(defaults: Dictionary(uniqueKeysWithValues: ruleToggles.map { ($0.2, true) })
-            .merging(["active": true, "displayStyle": false, "richScripts": true, "livePreview": true, "selectionToolbar": true]) { $1 })
+            .merging(["active": true, "displayStyle": false, "richScripts": true, "livePreview": true, "selectionToolbar": true, "noteFooter": true]) { $1 })
         loadSettings()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -48,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.formatter.check(); self?.preview.update(); self?.toolbar.update() }
         }
         monitor.onActivity = { [weak self] in
-            MainActor.assumeIsolated { self?.preview.update(); self?.toolbar.update() }
+            MainActor.assumeIsolated { self?.preview.update(); self?.toolbar.update(); self?.footer.update() }
         }
         monitor.onEscape = { [weak self] in
             MainActor.assumeIsolated { self?.toolbar.escapePressed() }
@@ -81,8 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         monitor.onNotesDeactivated = { [weak self] in
-            MainActor.assumeIsolated { self?.preview.hide(); self?.toolbar.notesDeactivated() }
+            MainActor.assumeIsolated { self?.preview.hide(); self?.toolbar.notesDeactivated(); self?.footer.notesDeactivated() }
         }
+        monitor.onNotesActivated = { [weak self] in
+            MainActor.assumeIsolated { self?.footer.notesActivated() }
+        }
+        footer.notesActivated()   // Notes may already be in front at launch
         startWhenTrusted()
     }
 
@@ -122,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !preview.isEnabled { preview.hide() }
         toolbar.isEnabled = defaults.bool(forKey: "selectionToolbar")
         if !toolbar.isEnabled { toolbar.hide() }
+        footer.isEnabled = defaults.bool(forKey: "noteFooter")
     }
 
     // MARK: - Menu (rebuilt each time it opens so state is always current)
@@ -341,13 +348,45 @@ func toolbarSnapshot(_ args: [String]) -> Never {
     exit(0)
 }
 
+/// Debug mode: `PriNotes --footer-snapshot out.png [count] [--dark]` draws the note footer capsule
+/// (on a grey backdrop; the glass itself only renders on screen), plus the toolbar's file-link icon.
+@MainActor
+func footerSnapshot(_ args: [String]) -> Never {
+    NSApplication.shared.appearance = NSAppearance(named: args.contains("--dark") ? .darkAqua : .aqua)
+    let footer = NoteFooter(formatter: Formatter())
+    let count = args.count > 2 ? Int(args[2]) ?? 2 : 2
+    let content = footer.debugContentView(count: count)
+    let icon = NSImageView(image: SelectionToolbar.folderLinkImage(pointSize: 28))
+    icon.contentTintColor = .labelColor
+    let margin: CGFloat = 12
+    let width = content.frame.width + icon.image!.size.width + 3 * margin
+    let height = max(content.frame.height, icon.image!.size.height) + 2 * margin
+    let backdrop = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+    backdrop.wantsLayer = true
+    backdrop.layer?.backgroundColor = NSColor(white: 0.5, alpha: 1).cgColor
+    content.setFrameOrigin(NSPoint(x: margin, y: margin))
+    icon.frame = NSRect(origin: NSPoint(x: content.frame.maxX + margin, y: margin), size: icon.image!.size)
+    backdrop.addSubview(content)
+    backdrop.addSubview(icon)
+    let rep = backdrop.bitmapImageRepForCachingDisplay(in: backdrop.bounds)!
+    backdrop.cacheDisplay(in: backdrop.bounds, to: rep)
+    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: args[1]))
+    print("footer \(Int(content.frame.width))×\(Int(content.frame.height)) pt → \(args[1])")
+    exit(0)
+}
+
 MainActor.assumeIsolated {
+    if let i = CommandLine.arguments.firstIndex(of: "--footer-snapshot") { footerSnapshot(Array(CommandLine.arguments[i...])) }
     if CommandLine.arguments.contains("--network-test") { networkTest() }
     if let i = CommandLine.arguments.firstIndex(of: "--mathml") { printMathML(Array(CommandLine.arguments[i...])) }
     if let i = CommandLine.arguments.firstIndex(of: "--toolbar-snapshot") { toolbarSnapshot(Array(CommandLine.arguments[i...])) }
     if let i = CommandLine.arguments.firstIndex(of: "--notes-lab") {
         let path = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : NSTemporaryDirectory() + "notes-lab.txt"
         NotesLab.run(reportPath: path)
+    }
+    if let i = CommandLine.arguments.firstIndex(of: "--notes-db-probe") {
+        let path = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : NSTemporaryDirectory() + "notes-db.txt"
+        NotesLab.probeDatabase(reportPath: path)
     }
     if CommandLine.arguments.contains("--recover-from-clipboard") { recoverFromClipboard() }
     if let i = CommandLine.arguments.firstIndex(of: "--menubar-icon") { renderMenuBarIcon(Array(CommandLine.arguments[i...])) }

@@ -574,6 +574,51 @@ flowchart TD
     STEP --> RE
 ```
 
+### 9.2 The note footer: backlinks and Copy as Markdown
+
+A third panel of the same kind sits in the bottom-right corner of the note. It isn't tied to a
+selection, so it has to follow the note editor itself.
+
+**Following the editor.** Notes' editor is an `AXScrollArea` identified as "Note Body Scroll View",
+holding an `AXTextArea` identified as `Note[id=<UUID>]`. The panel sits at that scroll area's
+corner. AX notifications report window moves and resizes; a 0.25 s check catches everything else
+(sidebar toggles, switching notes) and runs only while Notes is in front.
+
+**Backlinks.** Notes has no backlinks of its own, and none of the usual doors show note links: in
+AppleScript a `>>` link is missing from `body`, `plaintext` and `attachments`, and in AX it's an
+opaque attachment. The only place they exist is Notes' Core Data store, where each link is a row:
+
+```text
+NotesDatabase.backlinks(to: uuid):               # Sources/PriNotes/NotesDatabase.swift
+    open NoteStore.sqlite read-only               # needs Full Disk Access
+    rows where ZTYPEUTI1 = 'com.apple.notes.inlinetextattachment.link'
+           and ZTOKENCONTENTIDENTIFIER = 'applenotes://showNote?identifier=<uuid>[&…]'
+    → their notes (ZNOTE1), minus deleted links, deleted notes and Recently Deleted
+open one: NSWorkspace.open("applenotes://showNote?identifier=<its uuid>")   # Notes' own link
+```
+
+The UUID in the editor's AX identifier is the same one the database and the links use, so no
+AppleScript (and no Automation permission) is needed to know which note is open.
+
+**Copy as Markdown.** Notes (macOS 26+) already has Edit ▸ Copy as Markdown, which handles headings,
+lists, checklists and emphasis. It loses the equations, but leaves enough clues to put them back:
+
+```mermaid
+flowchart TD
+    B[Click the clipboard button] --> T["Find text equations in the note:<br/>a Palatino stretch ended by U+200B,<br/>LaTeX from equations.json"]
+    T --> A{"Attachments<br/>(U+FFFC) in the note?"}
+    A -->|yes| C["Select all, Edit ▸ Copy:<br/>PNGs with LaTeX in their metadata"]
+    A -->|no| M
+    C --> M["Select all, Edit ▸ Copy as Markdown"]
+    M --> R["MarkdownEquations.restore:<br/>k-th U+200B ↔ k-th equation, walk back over its characters;<br/>![name](…) ↔ attachment named name"]
+    R --> P["Clipboard: Markdown with $…$<br/>selection put back"]
+```
+
+Notes writes the Palatino Italic runs of `xb2` as emphasis (`**xb**2`) and keeps the invisible
+U+200B after it, so the k-th marker in the Markdown is the k-th marker in the note. Walking back from
+it while stepping over `*`, `_` and `~` finds the equation's start; an odd number of emphasis runs
+inside means one opened just before it.
+
 ---
 
 ## 10. Re-editing with ⌃⌘E
@@ -693,3 +738,13 @@ renderer and expects every one to be blocked.
 . **Test typing with real keystrokes.** AX inserts take the style of the preceding character, so
     they can't show what the *typing style* is. Post real key events (`CGEvent` through the HID tap)
     to see what a person typing would get.
+16. **Look for the data where the app keeps it.** When neither AppleScript nor Accessibility shows
+    something (here, note-to-note links), the app's own database may hold it plainly. Probe it
+    read-only first (`--notes-db-probe`), and treat the column names as something a macOS update can
+    change.
+17. **Tooltips need an active app.** AppKit shows `toolTip` only for the frontmost app, and our panels
+    never activate (focus must stay in Notes). Tracking areas with `.activeAlways` still see the
+    pointer, so the hover notes are drawn by hand (`HoverHint`).
+18. **Use the app's export before writing your own.** Notes' Copy as Markdown did the hard part;
+    the app only had to put the equations back, using the invisible markers it had left in the
+    note itself.

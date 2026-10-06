@@ -302,9 +302,7 @@ final class SelectionStyler {
         ax.setSelectedRange(of: el, NSRange(location: range.location, length: 1))
         let before = fontPB.changeCount
         guard ax.pressMenuItem("Copy Style") else { return nil }
-        let deadline = Date().addingTimeInterval(0.5)
-        while fontPB.changeCount == before, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
-        guard fontPB.changeCount != before,
+        guard fontPB.waitForChange(since: before, timeout: 0.5),
               let data = fontPB.data(forType: NSPasteboard.PasteboardType("com.apple.cocoa.pasteboard.character-formatting")),
               let copied = try? NSAttributedString(data: data, options: [:], documentAttributes: nil), copied.length > 0
         else { Log.write("Copy Style gave no colour for \(range)"); return nil }
@@ -376,13 +374,12 @@ final class SelectionStyler {
 
     /// Bring Notes to the front if needed (e.g. after using the colour panel) and wait for it.
     func ensureNotesFrontmost() -> Bool {
-        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == NotesAX.bundleID { return true }
-        guard let notes = NSRunningApplication.runningApplications(withBundleIdentifier: NotesAX.bundleID).first
-        else { return false }
+        if NotesAX.isFrontmost { return true }
+        guard let notes = NotesAX.runningApp else { return false }
         notes.activate()
         let deadline = Date().addingTimeInterval(1.0)
         while Date() < deadline {
-            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == NotesAX.bundleID { return true }
+            if NotesAX.isFrontmost { return true }
             RunLoop.current.run(until: Date().addingTimeInterval(0.03))
         }
         return false

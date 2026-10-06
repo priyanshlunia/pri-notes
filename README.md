@@ -1,9 +1,16 @@
-# Pri Notes (v1.1)
+# Pri Notes (v1.2)
 
 A small menu-bar app that makes Apple Notes respond to Markdown as you type, adds LaTeX math, and
 puts a Liquid Glass formatting toolbar above selected text, adds links to iCloud Drive files and
 folders that open on both your Mac and your iPhone, and shows backlinks and a Copy as Markdown button
 (equations as LaTeX) in the corner of each note. Fully offline. Modelled on the Markdown part of [NotesCmdr](https://smallest.app/notescmdr/).
+
+**New in 1.2:**
+- a note footer with **backlinks** and **Copy as Markdown** (equations as LaTeX);
+- **links to iCloud Drive files and folders** (⌃⌘K) that open on both Mac and iPhone;
+- **smart symbols** (`->` → …), switching an equation between **text and image** (⌃⌘⇧E), and
+  copying it as **LaTeX or MathML**;
+- hover notes on the toolbar and footer buttons, and a fix for toolbar clicks on macOS 26.
 
 ## What it does
 
@@ -69,7 +76,9 @@ in its menu. `$$…$$` supports AMS math plus `physics`, `braket`, `mathtools`, 
 
 Select text in a note and, after a short pause, a Liquid Glass toolbar appears above it:
 
-`[ Font ▾ | Typeface ▾ ]  [ B  I  U  S ]  [ −  size ▾  + ]  [ colour ▾ ]  [ 🔗 ]  [ ∑ ▾ ]`
+`[ Font ▾ | Typeface ▾ ]  [ B  I  U  S ]  [ −  size ▾  + ]  [ colour ▾ ]  [ 📁🔗 ]  [ ∑ ▾ ]`
+
+Rest the pointer on a button to see what it does.
 
 - **Font:** a curated list (System, Palatino, Helvetica Neue, Avenir Next, Georgia, Times New Roman,
   Baskerville, Menlo, SF Mono), plus **All Fonts**. Each word keeps its own bold/italic and size.
@@ -86,7 +95,8 @@ Select text in a note and, after a short pause, a Liquid Glass toolbar appears a
 - **Equations stay Palatino:** font, typeface, bold and italic changes skip `$…$` equations. Colour
   and size apply to them, so they match the surrounding text. New equations also take the colour
   and size of the text you type them into.
-- **🔗 Link to file:** turns the selection into a link to a file or folder in iCloud Drive (see below).
+- **📁🔗 Link to file** (a chain link with a small folder): turns the selection into a link to a file
+  or folder in iCloud Drive (see below).
 - **∑ Equation** (only when an equation is selected): switch it between text and image, or copy
   it as LaTeX or MathML. A selected image shows only this button; for an image that isn't a
   Pri Notes equation, the app reports that no LaTeX was found.
@@ -169,7 +179,8 @@ Pri Notes is fully offline and keeps everything on this Mac.
 
 ### Requirements
 
-- **macOS 26 or later** (the toolbar uses Liquid Glass). Apple silicon or Intel; it's built from
+- **macOS 26 or later** (the toolbar and footer use Liquid Glass; Copy as Markdown uses Notes' own
+  Markdown export, new in macOS 26). Apple silicon or Intel; it's built from
   source for whichever Mac you're on.
 - **The Xcode Command Line Tools**, for `swift`. Full Xcode isn't needed. Install them with
   `xcode-select --install`.

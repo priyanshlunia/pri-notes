@@ -93,9 +93,28 @@ final class NotesAX {
         AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
     }
 
+    /// The note's full text, in the same UTF-16 coordinates as `AXSelectedTextRange`.
+    ///
+    /// Collapsed sections: `AXValue` leaves out the body of every collapsed heading, but the
+    /// selection, `AXNumberOfCharacters` and the parameterized attributes all count the full
+    /// storage (seen 2026-10-07, macOS 27: value 1322 units, 2044 characters, cursor at 1031 in
+    /// storage terms). Slicing the short value with the selection reads the wrong text, so Markdown
+    /// detection silently failed below a collapsed section. When the two lengths disagree, read the
+    /// whole storage with `AXStringForRange` instead.
+    ///
+    /// Example: `let text = ax.value(of: el); let sel = ax.selectedRange(of: el)` — `sel` indexes `text`.
     func value(of el: AXUIElement) -> NSString? {
-        let s: String? = attribute(el, kAXValueAttribute)
-        return s as NSString?
+        guard let shown: String = attribute(el, kAXValueAttribute) else { return nil }
+        let value = shown as NSString
+        guard let count: Int = attribute(el, kAXNumberOfCharactersAttribute), count != value.length else { return value }
+        var cf = CFRange(location: 0, length: count)
+        var result: CFTypeRef?
+        guard let rangeValue = AXValueCreate(.cfRange, &cf),
+              AXUIElementCopyParameterizedAttributeValue(
+                el, kAXStringForRangeParameterizedAttribute as CFString, rangeValue, &result) == .success,
+              let full = result as? String, (full as NSString).length == count
+        else { return value }
+        return full as NSString
     }
 
     func selectedRange(of el: AXUIElement) -> NSRange? {
